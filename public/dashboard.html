@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rust+ Control</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main>
+    <header><div><p class="eyebrow">RUST+ COMPANION</p><h1>Electrical control</h1></div><div class="header-actions"><span id="connection" class="status">Loading</span><button type="button" class="secondary" id="sign-out">Sign out</button></div></header>
+    <section class="server-bar"><label>Active server<select id="server-select"></select></label></section>
+    <section id="devices" class="devices"></section>
+    <section class="notifications"><div class="row-title"><h2>Map events</h2><button type="button" class="secondary" id="enable-notifications">Enable notifications</button></div><p id="notification-state" class="hint"></p><div id="event-list" class="event-list"></div></section>
+    <section class="pairing"><div class="row-title"><h2>Rust+ pairing</h2><span id="pairing-status" class="hint">Checking...</span></div><div class="pairing-actions"><button type="button" class="secondary" id="register-rustplus">Register Rust+</button><button type="button" class="secondary danger" id="logout-rustplus">Reset Rust+ pairing</button></div></section>
+    <section class="setup"><h2>Connection</h2><form id="config-form">
+      <label>Server host<input name="host" placeholder="123.45.67.89 or hostname" required></label>
+      <label>App port<input name="port" inputmode="numeric" placeholder="28017" required></label>
+      <label>Steam64 ID<input name="playerId" inputmode="numeric" required></label>
+      <label>Pairing token<input name="playerToken" type="text" autocomplete="off" placeholder="Paste token, then save and connect"></label>
+      <label class="checkbox"><input type="checkbox" name="useProxy"> Use Facepunch proxy</label>
+      <button class="save" type="submit">Save and connect</button><p id="feedback" role="status"></p>
+    </form></section>
+  </main>
+  <dialog id="pairing-dialog"><form id="pairing-form" method="dialog"><h2>New Rust+ device</h2><p id="pairing-device-id" class="hint"></p><label>Name<input id="pairing-device-name" required></label><label>Type<select id="pairing-device-type"><option value="switch">Smart Switch</option><option value="alarm">Smart Alarm</option></select></label><div class="dialog-actions"><button type="button" class="secondary" id="reject-pairing">Cancel</button><button type="submit">Add device</button></div></form></dialog>
+  <script src="/auth.js"></script><script src="/app.js"></script>
+</body>
+</html>

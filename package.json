@@ -1,0 +1,19 @@
+{
+  "name": "rust",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "postinstall": "node scripts/patch-rustplus-proto.js",
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@liamcottle/rustplus.js": "^2.5.0",
+    "express": "^5.2.1"
+  }
+}
