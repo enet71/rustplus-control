@@ -6,6 +6,7 @@
   "scripts": {
     "postinstall": "node scripts/patch-rustplus-proto.js",
     "start": "node server.js",
+    "start:test": "node scripts/start-with-test-key.js",
     "test": "node --test"
   },
   "keywords": [],

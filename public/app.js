@@ -1,6 +1,5 @@
 const connection = document.querySelector('#connection');
 const devices = document.querySelector('#devices');
-const form = document.querySelector('#config-form');
 const feedback = document.querySelector('#feedback');
 const eventList = document.querySelector('#event-list');
 const notificationButton = document.querySelector('#enable-notifications');
@@ -14,8 +13,6 @@ const pairingDeviceName = document.querySelector('#pairing-device-name');
 const pairingDeviceType = document.querySelector('#pairing-device-type');
 const serverSelect = document.querySelector('#server-select');
 const signOutButton = document.querySelector('#sign-out');
-let formHydrated = false;
-let displayedServerId = null;
 let activePairing = null;
 
 function render(state) {
@@ -51,14 +48,6 @@ async function refresh() {
   if (!response.ok) return;
   const state = await response.json();
   render(state);
-  if (!formHydrated || displayedServerId !== state.config.activeServerId) {
-    const server = state.config.server;
-    for (const name of ['host', 'port', 'playerId']) form.elements[name].value = server[name] || '';
-    form.elements.useProxy.checked = Boolean(server.useProxy);
-    if (server.hasPlayerToken) form.elements.playerToken.placeholder = 'Saved locally (enter only to replace)';
-    formHydrated = true;
-    displayedServerId = state.config.activeServerId;
-  }
 }
 
 async function refreshPairingStatus() {
@@ -116,15 +105,6 @@ pairingForm.addEventListener('submit', async (event) => {
   const result = await apiFetch(`/api/pairings/${encodeURIComponent(activePairing.id)}/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: pairingDeviceName.value.trim(), type: pairingDeviceType.value }) });
   if (!result.ok) { feedback.textContent = (await result.json()).error || 'Unable to add device.'; return; }
   pairingDialog.close(); activePairing = null; await refresh(); refreshPendingPairings();
-});
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const data = new FormData(form);
-  const payload = { server: Object.fromEntries(data) };
-  payload.server.useProxy = form.elements.useProxy.checked;
-  const result = await apiFetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  feedback.textContent = result.ok ? 'Saved. Connecting...' : (await result.json()).error;
-  if (result.ok) setTimeout(refresh, 400);
 });
 refresh(); setInterval(refresh, 3000);
 refreshPairingStatus(); setInterval(refreshPairingStatus, 3000);
