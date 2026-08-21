@@ -5,6 +5,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY scripts ./scripts
 RUN npm ci --omit=dev
+RUN node scripts/patch-rustplus-proto.js
 
 COPY server.js ./
 COPY public ./public

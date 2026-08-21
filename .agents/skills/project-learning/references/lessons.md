@@ -16,4 +16,12 @@ Use this file for confirmed, project-specific lessons. Add entries in reverse ch
 **Evidence:** User feedback, test, review finding, or verification result.
 ```
 
-There are no confirmed lessons recorded yet.
+## 2026-08-20 - Rust+ pairing tokens are not self-service manual input
+
+**Context:** Planning Rust+ onboarding for ordinary players rather than Rust server administrators.
+
+**What went wrong:** Manual entry of a Rust+ player token was presented as a practical alternative to FCM pairing without verifying how a player obtains that token.
+
+**Required behavior:** Treat FCM pairing as required for ordinary-player self-service onboarding. Mention manual token entry only for server administrators who can read `player.tokens.db` or another explicitly trusted source.
+
+**Evidence:** The installed `@liamcottle/rustplus.js` pairing documentation states that pairing notifications carry `playerId` and `playerToken`; its manual lookup procedure is specifically for Rust server administrators with access to `player.tokens.db`.
