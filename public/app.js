@@ -72,8 +72,8 @@ function toggleGroupCollapsed(serverId, groupId) {
   localStorage.setItem(COLLAPSED_GROUPS_STORAGE_KEY, JSON.stringify(groups));
 }
 
-function toggleMarkup(name, enabled, connected, className) {
-  return `<button type="button" class="toggle-switch ${className} ${enabled ? 'is-on' : ''}" role="switch" aria-checked="${enabled}" aria-label="Toggle ${escapeHtml(name)}" ${connected ? '' : 'disabled'}><span></span></button>`;
+function toggleMarkup(name, enabled, className) {
+  return `<button type="button" class="toggle-switch ${className} ${enabled ? 'is-on' : ''}" role="switch" aria-checked="${enabled}" aria-label="Toggle ${escapeHtml(name)}"><span></span></button>`;
 }
 
 function addOrderControls(row, type, id, position, count) {
@@ -91,7 +91,7 @@ function renderDeviceRow(device, state, position, count, child = false) {
   const stateLabel = enabled === undefined ? 'State unknown' : enabled ? isAlarm ? 'Alarm active' : 'Powered on' : isAlarm ? 'Monitoring' : 'Powered off';
   const row = document.createElement('article');
   row.className = `control-row ${child ? 'group-child' : ''}`;
-  row.innerHTML = `<div class="control-info"><h3>${escapeHtml(device.name)}</h3><p>${stateLabel}</p></div><div class="control-actions"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(device.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(device.name)} down">&darr;</button><button type="button" class="secondary rename-device" aria-label="Rename ${escapeHtml(device.name)}">Rename</button>${isAlarm ? '<span class="alarm-status">ALARM</span>' : toggleMarkup(device.name, enabled === true, state.connected, 'device-switch')}</div>`;
+  row.innerHTML = `<div class="control-info"><h3>${escapeHtml(device.name)}</h3><p>${stateLabel}</p></div><div class="control-actions"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(device.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(device.name)} down">&darr;</button><button type="button" class="secondary rename-device" aria-label="Rename ${escapeHtml(device.name)}">Rename</button>${isAlarm ? '<span class="alarm-status">ALARM</span>' : toggleMarkup(device.name, enabled === true, 'device-switch')}</div>`;
   addOrderControls(row, 'device', device.entityId, position, count);
   row.querySelector('.rename-device').addEventListener('click', () => openDeviceEditor(device));
   if (!isAlarm) row.querySelector('.device-switch').addEventListener('click', (event) => toggle(device.entityId, enabled !== true, event.currentTarget));
@@ -116,7 +116,7 @@ function renderControls(state) {
     const collapsed = isGroupCollapsed(state.config.activeServerId || '', group.id);
     const groupRow = document.createElement('article');
     groupRow.className = 'control-row group-row';
-    groupRow.innerHTML = `<div class="control-info"><h3>${escapeHtml(group.name)}</h3><p>${group.deviceIds.length} switch${group.deviceIds.length === 1 ? '' : 'es'}</p></div><div class="control-actions group-actions"><div class="group-action-row"><button type="button" class="secondary edit-group" aria-label="Edit ${escapeHtml(group.name)}">Edit</button><button type="button" class="collapse-group ${collapsed ? 'is-collapsed' : ''}" title="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(group.name)}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(group.name)}" aria-expanded="${!collapsed}"><span class="collapse-icon" aria-hidden="true"></span></button></div><div class="group-action-row"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(group.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(group.name)} down">&darr;</button>${toggleMarkup(group.name, allEnabled, state.connected, 'group-switch')}</div></div>`;
+    groupRow.innerHTML = `<div class="control-info"><h3>${escapeHtml(group.name)}</h3><p>${group.deviceIds.length} switch${group.deviceIds.length === 1 ? '' : 'es'}</p></div><div class="control-actions group-actions"><div class="group-action-row"><button type="button" class="secondary edit-group" aria-label="Edit ${escapeHtml(group.name)}">Edit</button><button type="button" class="collapse-group ${collapsed ? 'is-collapsed' : ''}" title="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(group.name)}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(group.name)}" aria-expanded="${!collapsed}"><span class="collapse-icon" aria-hidden="true"></span></button></div><div class="group-action-row"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(group.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(group.name)} down">&darr;</button>${toggleMarkup(group.name, allEnabled, 'group-switch')}</div></div>`;
     addOrderControls(groupRow, 'group', group.id, index, rootItems.length);
     groupRow.querySelector('.collapse-group').addEventListener('click', () => {
       toggleGroupCollapsed(state.config.activeServerId || '', group.id);
