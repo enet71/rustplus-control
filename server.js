@@ -14,6 +14,7 @@ const LEGACY_FCM_CONFIG_PATH = path.join(__dirname, 'rustplus.config.json');
 const FCM_CLI_PATH = path.join(__dirname, 'node_modules', '@liamcottle', 'rustplus.js', 'cli', 'index.js');
 const FCM_LISTENER_PATH = path.join(__dirname, 'scripts', 'fcm-listen.js');
 const API_AUTH_TOKEN = process.env.APP_AUTH_TOKEN;
+const RECONNECT_DELAY_MS = 5000;
 
 if (!API_AUTH_TOKEN) throw new Error('APP_AUTH_TOKEN must be set before starting Rust+ Control.');
 
@@ -45,6 +46,7 @@ let teamDeaths = new Map();
 const eventClients = new Set();
 let markerPolling = null;
 let teamPolling = null;
+let reconnectTimer = null;
 let fcmRegisterProcess = null;
 let fcmListenerProcess = null;
 let fcmStatus = { registered: fs.existsSync(FCM_CONFIG_PATH), listening: false, message: 'Not registered' };
@@ -235,8 +237,30 @@ function startTeamPolling() {
   teamPolling = setInterval(poll, 10000);
 }
 
+function cancelReconnect() {
+  if (!reconnectTimer) return;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  const server = activeProfile()?.server || {};
+  if (![server.host, server.port, server.playerId, server.playerToken].every(Boolean)) return;
+  status = { connected: false, message: `Disconnected. Retrying in ${RECONNECT_DELAY_MS / 1000} seconds...` };
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connect();
+  }, RECONNECT_DELAY_MS);
+}
+
 function connect() {
-  if (client) client.disconnect();
+  cancelReconnect();
+  if (client) {
+    const previousClient = client;
+    client = null;
+    previousClient.disconnect();
+  }
   const profile = activeProfile();
   const server = profile?.server || {};
   if (!server.host || !server.port || !server.playerId || !server.playerToken) {
@@ -249,6 +273,7 @@ function connect() {
   client = rustplus;
   rustplus.on('connected', () => {
     if (client !== rustplus) return;
+    cancelReconnect();
     status = { connected: true, message: 'Connected' };
     for (const device of profile?.devices || []) {
       rustplus.getEntityInfo(String(device.entityId), (message) => {
@@ -261,8 +286,17 @@ function connect() {
     startTeamPolling();
   });
   rustplus.on('connecting', () => { if (client === rustplus) status = { connected: false, message: 'Connecting...' }; });
-  rustplus.on('disconnected', () => { if (client === rustplus) { status = { connected: false, message: 'Disconnected' }; clearInterval(markerPolling); clearInterval(teamPolling); } });
-  rustplus.on('error', (error) => { if (client === rustplus) status = { connected: false, message: `Connection error: ${error.message}` }; });
+  rustplus.on('disconnected', () => {
+    if (client !== rustplus) return;
+    clearInterval(markerPolling);
+    clearInterval(teamPolling);
+    scheduleReconnect();
+  });
+  rustplus.on('error', (error) => {
+    if (client !== rustplus) return;
+    status = { connected: false, message: `Connection error: ${error.message}` };
+    scheduleReconnect();
+  });
   rustplus.on('message', (message) => {
     if (client !== rustplus) return;
     const changed = message.broadcast && message.broadcast.entityChanged;
@@ -284,6 +318,7 @@ app.get('/api/state', (request, response) => response.json({ ...status, config: 
 app.get('/api/fcm/status', (request, response) => response.json(fcmStatus));
 app.post('/api/fcm/register', (request, response) => { startFcmRegister(); response.status(202).json({ ok: true }); });
 app.post('/api/fcm/logout', (request, response) => {
+  cancelReconnect();
   fcmRegisterProcess?.kill();
   fcmListenerProcess?.kill();
   fcmRegisterProcess = null;
