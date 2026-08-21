@@ -15,9 +15,24 @@ const FCM_CLI_PATH = path.join(__dirname, 'node_modules', '@liamcottle', 'rustpl
 const FCM_LISTENER_PATH = path.join(__dirname, 'scripts', 'fcm-listen.js');
 const API_AUTH_TOKEN = process.env.APP_AUTH_TOKEN;
 const RECONNECT_DELAY_MS = 5000;
+const DEVICE_STATE_REQUEST_DELAY_MS = 200;
 const FCM_REGISTRATION_AVAILABLE = process.env.NODE_ENV !== 'production';
 
 if (!API_AUTH_TOKEN) throw new Error('APP_AUTH_TOKEN must be set before starting Rust+ Control.');
+
+function errorSummary(error) {
+  const name = error?.name || 'Error';
+  const message = String(error?.message || '').replace(/[\r\n]+/g, ' ').slice(0, 240);
+  return message ? `${name}: ${message}` : name;
+}
+
+function logRust(event) {
+  console.log(`[rustplus] ${event}`);
+}
+
+process.on('uncaughtExceptionMonitor', (error, origin) => {
+  logRust(`fatal ${origin}: ${errorSummary(error)}`);
+});
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -47,6 +62,7 @@ let teamDeaths = new Map();
 const eventClients = new Set();
 let markerPolling = null;
 let teamPolling = null;
+let deviceStateLoadingTimer = null;
 let reconnectTimer = null;
 let fcmRegisterProcess = null;
 let fcmListenerProcess = null;
@@ -295,6 +311,46 @@ function cancelReconnect() {
   reconnectTimer = null;
 }
 
+function stopDeviceStateLoading() {
+  clearTimeout(deviceStateLoadingTimer);
+  deviceStateLoadingTimer = null;
+}
+
+function loadDeviceStates(rustplus, devices) {
+  stopDeviceStateLoading();
+  const pendingDevices = [...devices];
+  const total = pendingDevices.length;
+  let requested = 0;
+  logRust(`device state queue started: ${total} device(s)`);
+  const requestNext = () => {
+    if (client !== rustplus || !status.connected) return;
+    const device = pendingDevices.shift();
+    if (!device) return;
+    requested += 1;
+    const requestNumber = requested;
+    logRust(`device state request ${requestNumber}/${total}`);
+    try {
+      rustplus.getEntityInfo(String(device.entityId), (message) => {
+        if (client !== rustplus) return true;
+        if (message.response?.error) {
+          logRust(`device state response error ${requestNumber}/${total}: ${errorSummary({ name: 'Rust+ response', message: message.response.error.error })}`);
+        }
+        const value = message.response?.entityInfo?.payload?.value;
+        if (typeof value === 'boolean') publishEntityState(device.entityId, value);
+        return true;
+      });
+    } catch (error) {
+      logRust(`device state request failed ${requestNumber}/${total}: ${errorSummary(error)}`);
+    }
+    if (pendingDevices.length) {
+      deviceStateLoadingTimer = setTimeout(requestNext, DEVICE_STATE_REQUEST_DELAY_MS);
+    } else {
+      logRust(`device state queue completed: ${total} device(s)`);
+    }
+  };
+  requestNext();
+}
+
 function scheduleReconnect() {
   if (reconnectTimer) return;
   const server = activeProfile()?.server || {};
@@ -308,6 +364,7 @@ function scheduleReconnect() {
 
 function connect() {
   cancelReconnect();
+  stopDeviceStateLoading();
   if (client) {
     const previousClient = client;
     client = null;
@@ -321,31 +378,30 @@ function connect() {
   }
 
   status = { connected: false, message: 'Connecting...' };
+  logRust('connecting');
   const rustplus = new RustPlus(server.host, String(server.port), String(server.playerId), String(server.playerToken), Boolean(server.useProxy));
   client = rustplus;
   rustplus.on('connected', () => {
     if (client !== rustplus) return;
     cancelReconnect();
     status = { connected: true, message: 'Connected' };
-    for (const device of profile?.devices || []) {
-      rustplus.getEntityInfo(String(device.entityId), (message) => {
-        const value = message.response && message.response.entityInfo && message.response.entityInfo.payload.value;
-        if (typeof value === 'boolean') publishEntityState(device.entityId, value);
-        return true;
-      });
-    }
+    logRust('connected');
+    loadDeviceStates(rustplus, profile?.devices || []);
     startMarkerPolling();
     startTeamPolling();
   });
   rustplus.on('connecting', () => { if (client === rustplus) status = { connected: false, message: 'Connecting...' }; });
   rustplus.on('disconnected', () => {
     if (client !== rustplus) return;
+    logRust(`disconnected; retrying in ${RECONNECT_DELAY_MS / 1000}s`);
+    stopDeviceStateLoading();
     clearInterval(markerPolling);
     clearInterval(teamPolling);
     scheduleReconnect();
   });
   rustplus.on('error', (error) => {
     if (client !== rustplus) return;
+    logRust(`socket error: ${errorSummary(error)}`);
     status = { connected: false, message: `Connection error: ${error.message}` };
     scheduleReconnect();
   });
@@ -375,6 +431,7 @@ app.post('/api/fcm/register', (request, response) => {
 });
 app.post('/api/fcm/logout', (request, response) => {
   cancelReconnect();
+  stopDeviceStateLoading();
   fcmRegisterProcess?.kill();
   fcmListenerProcess?.kill();
   fcmRegisterProcess = null;
