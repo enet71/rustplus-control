@@ -26,6 +26,9 @@ const saveGroup = document.querySelector('#save-group');
 const deleteGroupButton = document.querySelector('#delete-group');
 const serverSelect = document.querySelector('#server-select');
 const signOutButton = document.querySelector('#sign-out');
+const COLLAPSED_GROUPS_STORAGE_KEY = 'rustplus-control.collapsed-groups';
+const EVENTS_STORAGE_KEY = 'rustplus-control.events';
+const MAX_STORED_EVENTS = 150;
 let activePairing = null;
 let activeDevice = null;
 let activeGroup = null;
@@ -45,6 +48,28 @@ function render(state) {
 
 function sortItems(items) {
   return [...items].sort((left, right) => Number(left.sortOrder || 0) - Number(right.sortOrder || 0));
+}
+
+function collapsedGroups() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_STORAGE_KEY) || '{}');
+    return stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+  } catch {
+    return {};
+  }
+}
+
+function isGroupCollapsed(serverId, groupId) {
+  return collapsedGroups()[serverId]?.includes(groupId) || false;
+}
+
+function toggleGroupCollapsed(serverId, groupId) {
+  const groups = collapsedGroups();
+  const collapsed = new Set(groups[serverId] || []);
+  if (collapsed.has(groupId)) collapsed.delete(groupId);
+  else collapsed.add(groupId);
+  groups[serverId] = [...collapsed];
+  localStorage.setItem(COLLAPSED_GROUPS_STORAGE_KEY, JSON.stringify(groups));
 }
 
 function toggleMarkup(name, enabled, connected, className) {
@@ -88,15 +113,20 @@ function renderControls(state) {
     }
     const group = item;
     const allEnabled = group.deviceIds.every((entityId) => state.deviceStates[entityId] === true);
+    const collapsed = isGroupCollapsed(state.config.activeServerId || '', group.id);
     const groupRow = document.createElement('article');
     groupRow.className = 'control-row group-row';
-    groupRow.innerHTML = `<div class="control-info"><h3>${escapeHtml(group.name)}</h3><p>${group.deviceIds.length} switch${group.deviceIds.length === 1 ? '' : 'es'}</p></div><div class="control-actions"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(group.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(group.name)} down">&darr;</button><button type="button" class="secondary edit-group" aria-label="Edit ${escapeHtml(group.name)}">Edit</button>${toggleMarkup(group.name, allEnabled, state.connected, 'group-switch')}</div>`;
+    groupRow.innerHTML = `<div class="control-info"><h3>${escapeHtml(group.name)}</h3><p>${group.deviceIds.length} switch${group.deviceIds.length === 1 ? '' : 'es'}</p></div><div class="control-actions group-actions"><div class="group-action-row"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(group.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(group.name)} down">&darr;</button><button type="button" class="collapse-group ${collapsed ? 'is-collapsed' : ''}" title="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(group.name)}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(group.name)}" aria-expanded="${!collapsed}"><span class="collapse-icon" aria-hidden="true"></span></button></div><div class="group-action-row"><button type="button" class="secondary edit-group" aria-label="Edit ${escapeHtml(group.name)}">Edit</button>${toggleMarkup(group.name, allEnabled, state.connected, 'group-switch')}</div></div>`;
     addOrderControls(groupRow, 'group', group.id, index, rootItems.length);
+    groupRow.querySelector('.collapse-group').addEventListener('click', () => {
+      toggleGroupCollapsed(state.config.activeServerId || '', group.id);
+      renderControls(state);
+    });
     groupRow.querySelector('.edit-group').addEventListener('click', () => openGroupEditor(group));
     groupRow.querySelector('.group-switch').addEventListener('click', (event) => toggleGroup(group.id, !allEnabled, event.currentTarget));
     controlList.append(groupRow);
     const children = sortItems(group.deviceIds.map((entityId) => state.config.devices.find((device) => device.entityId === entityId)).filter(Boolean));
-    children.forEach((device, childIndex) => controlList.append(renderDeviceRow(device, state, childIndex, children.length, true)));
+    if (!collapsed) children.forEach((device, childIndex) => controlList.append(renderDeviceRow(device, state, childIndex, children.length, true)));
   }
   if (!rootItems.length) controlList.innerHTML = '<p class="empty">Pair a Smart Switch or Smart Alarm in Rust to add it here.</p>';
 }
@@ -183,16 +213,45 @@ async function moveItem(type, id, direction) {
 }
 
 function escapeHtml(value) { const div = document.createElement('div'); div.textContent = value; return div.innerHTML; }
+function normalizeEvent(event) {
+  return {
+    id: String(event?.id || `${Date.now()}:${Math.random()}`),
+    title: String(event?.title || 'Map event').slice(0, 160),
+    body: String(event?.body || '').slice(0, 600),
+  };
+}
+function storedEvents() {
+  try {
+    const events = JSON.parse(localStorage.getItem(EVENTS_STORAGE_KEY) || '[]');
+    return Array.isArray(events) ? events.filter((event) => event && typeof event === 'object').map(normalizeEvent).slice(0, MAX_STORED_EVENTS) : [];
+  } catch {
+    return [];
+  }
+}
+function saveEvent(event) {
+  try {
+    const events = [event, ...storedEvents().filter((stored) => stored.id !== event.id)].slice(0, MAX_STORED_EVENTS);
+    localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(events));
+  } catch {
+    // Storage can be unavailable or full; the current-page event list still works.
+  }
+}
+function renderEvent(event, prepend = true) {
+  const item = document.createElement('p');
+  item.innerHTML = `<strong>${escapeHtml(event.title)}</strong> ${escapeHtml(event.body)}`;
+  if (prepend) eventList.prepend(item);
+  else eventList.append(item);
+  while (eventList.children.length > MAX_STORED_EVENTS) eventList.lastElementChild.remove();
+}
 function updateNotificationState() {
   if (!('Notification' in window)) { notificationState.textContent = 'Browser notifications are not supported.'; notificationButton.disabled = true; return; }
   notificationState.textContent = Notification.permission === 'granted' ? 'Browser notifications are enabled.' : 'Allow notifications to receive map events.';
 }
 function showEvent(event) {
-  const item = document.createElement('p');
-  item.innerHTML = `<strong>${escapeHtml(event.title)}</strong> ${escapeHtml(event.body)}`;
-  eventList.prepend(item);
-  while (eventList.children.length > 8) eventList.lastElementChild.remove();
-  if ('Notification' in window && Notification.permission === 'granted') new Notification(event.title, { body: event.body });
+  const normalized = normalizeEvent(event);
+  saveEvent(normalized);
+  renderEvent(normalized);
+  if ('Notification' in window && Notification.permission === 'granted') new Notification(normalized.title, { body: normalized.body });
 }
 document.querySelector('#register-rustplus').addEventListener('click', async () => { await apiFetch('/api/fcm/register', { method: 'POST' }); refreshPairingStatus(); });
 document.querySelector('#logout-rustplus').addEventListener('click', async () => { await apiFetch('/api/fcm/logout', { method: 'POST' }); pairingDialog.close(); activePairing = null; await refreshPairingStatus(); await refresh(); });
@@ -255,6 +314,7 @@ refresh(); setInterval(refresh, 3000);
 refreshPairingStatus(); setInterval(refreshPairingStatus, 3000);
 refreshPendingPairings(); setInterval(refreshPendingPairings, 5000);
 updateNotificationState();
+storedEvents().forEach((event) => renderEvent(event, false));
 async function subscribeEvents() {
   try {
     const response = await apiFetch('/api/events', { headers: { Accept: 'text/event-stream' } });

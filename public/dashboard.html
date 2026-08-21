@@ -8,11 +8,15 @@
 </head>
 <body>
   <main>
-    <header><div><p class="eyebrow">RUST+ COMPANION</p><h1>Electrical control</h1></div><div class="header-actions"><span id="connection" class="status">Loading</span><button type="button" class="secondary" id="sign-out">Sign out</button></div></header>
-    <section id="pairing" class="pairing" hidden><div class="row-title"><h2>Rust+ pairing</h2><span id="pairing-status" class="hint">Checking...</span></div><div class="pairing-actions"><button type="button" class="secondary" id="register-rustplus">Register Rust+</button><button type="button" class="secondary danger" id="logout-rustplus">Reset Rust+ pairing</button></div></section>
-    <section class="server-bar"><label>Active server<select id="server-select"></select></label><p id="feedback" class="hint" role="status"></p></section>
-    <section class="controls"><div class="row-title"><h2>Controls</h2><button id="create-group" class="secondary" type="button">New group</button></div><div id="control-list" class="control-list"></div></section>
-    <section class="notifications"><div class="row-title"><h2>Map events</h2><button type="button" class="secondary" id="enable-notifications">Enable notifications</button></div><p id="notification-state" class="hint"></p><div id="event-list" class="event-list"></div></section>
+    <div class="dashboard-layout">
+      <div class="dashboard-primary">
+        <header><div><p class="eyebrow">RUST+ COMPANION</p><h1>Electrical control</h1></div><div class="header-actions"><span id="connection" class="status">Loading</span><button type="button" class="secondary" id="sign-out">Sign out</button></div></header>
+        <section id="pairing" class="pairing" hidden><div class="row-title"><h2>Rust+ pairing</h2><span id="pairing-status" class="hint">Checking...</span></div><div class="pairing-actions"><button type="button" class="secondary" id="register-rustplus">Register Rust+</button><button type="button" class="secondary danger" id="logout-rustplus">Reset Rust+ pairing</button></div></section>
+        <section class="server-bar"><label>Active server<select id="server-select"></select></label><p id="feedback" class="hint" role="status"></p></section>
+        <section class="controls"><div class="row-title"><h2>Controls</h2><button id="create-group" class="secondary" type="button">New group</button></div><div id="control-list" class="control-list"></div></section>
+      </div>
+      <section class="notifications"><div class="row-title"><h2>Map events</h2><button type="button" class="secondary" id="enable-notifications">Enable notifications</button></div><p id="notification-state" class="hint"></p><div id="event-list" class="event-list"></div></section>
+    </div>
   </main>
   <dialog id="pairing-dialog"><form id="pairing-form" method="dialog"><h2>New Rust+ device</h2><p id="pairing-device-id" class="hint"></p><label>Name<input id="pairing-device-name" required></label><label>Type<select id="pairing-device-type"><option value="switch">Smart Switch</option><option value="alarm">Smart Alarm</option></select></label><div class="dialog-actions"><button type="button" class="secondary" id="reject-pairing">Cancel</button><button type="submit">Add device</button></div></form></dialog>
   <dialog id="device-dialog"><form id="device-form" method="dialog"><h2>Rename device</h2><label>Name<input id="device-name" maxlength="80" required></label><div class="dialog-actions"><button type="button" class="secondary" id="cancel-device-edit">Cancel</button><button id="save-device-name" type="submit">Save</button></div></form></dialog>
