@@ -4,6 +4,7 @@ const feedback = document.querySelector('#feedback');
 const eventList = document.querySelector('#event-list');
 const notificationButton = document.querySelector('#enable-notifications');
 const notificationState = document.querySelector('#notification-state');
+const pairingSection = document.querySelector('#pairing');
 const pairingStatus = document.querySelector('#pairing-status');
 const registerButton = document.querySelector('#register-rustplus');
 const pairingDialog = document.querySelector('#pairing-dialog');
@@ -54,6 +55,7 @@ async function refreshPairingStatus() {
   const response = await apiFetch('/api/fcm/status');
   if (!response.ok) return;
   const status = await response.json();
+  pairingSection.hidden = !status.registrationAvailable;
   pairingStatus.textContent = status.message;
   registerButton.disabled = status.registered;
 }

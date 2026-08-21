@@ -15,6 +15,7 @@ const FCM_CLI_PATH = path.join(__dirname, 'node_modules', '@liamcottle', 'rustpl
 const FCM_LISTENER_PATH = path.join(__dirname, 'scripts', 'fcm-listen.js');
 const API_AUTH_TOKEN = process.env.APP_AUTH_TOKEN;
 const RECONNECT_DELAY_MS = 5000;
+const FCM_REGISTRATION_AVAILABLE = process.env.NODE_ENV !== 'production';
 
 if (!API_AUTH_TOKEN) throw new Error('APP_AUTH_TOKEN must be set before starting Rust+ Control.');
 
@@ -315,8 +316,12 @@ function connect() {
 
 app.get('/api/auth/verify', (request, response) => response.json({ authenticated: true }));
 app.get('/api/state', (request, response) => response.json({ ...status, config: publicConfig(), deviceStates }));
-app.get('/api/fcm/status', (request, response) => response.json(fcmStatus));
-app.post('/api/fcm/register', (request, response) => { startFcmRegister(); response.status(202).json({ ok: true }); });
+app.get('/api/fcm/status', (request, response) => response.json({ ...fcmStatus, registrationAvailable: FCM_REGISTRATION_AVAILABLE }));
+app.post('/api/fcm/register', (request, response) => {
+  if (!FCM_REGISTRATION_AVAILABLE) return response.status(403).json({ error: 'Rust+ registration is available only on a local installation.' });
+  startFcmRegister();
+  return response.status(202).json({ ok: true });
+});
 app.post('/api/fcm/logout', (request, response) => {
   cancelReconnect();
   fcmRegisterProcess?.kill();
