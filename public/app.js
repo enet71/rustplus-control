@@ -116,7 +116,7 @@ function renderControls(state) {
     const collapsed = isGroupCollapsed(state.config.activeServerId || '', group.id);
     const groupRow = document.createElement('article');
     groupRow.className = 'control-row group-row';
-    groupRow.innerHTML = `<div class="control-info"><h3>${escapeHtml(group.name)}</h3><p>${group.deviceIds.length} switch${group.deviceIds.length === 1 ? '' : 'es'}</p></div><div class="control-actions group-actions"><div class="group-action-row"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(group.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(group.name)} down">&darr;</button><button type="button" class="collapse-group ${collapsed ? 'is-collapsed' : ''}" title="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(group.name)}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(group.name)}" aria-expanded="${!collapsed}"><span class="collapse-icon" aria-hidden="true"></span></button></div><div class="group-action-row"><button type="button" class="secondary edit-group" aria-label="Edit ${escapeHtml(group.name)}">Edit</button>${toggleMarkup(group.name, allEnabled, state.connected, 'group-switch')}</div></div>`;
+    groupRow.innerHTML = `<div class="control-info"><h3>${escapeHtml(group.name)}</h3><p>${group.deviceIds.length} switch${group.deviceIds.length === 1 ? '' : 'es'}</p></div><div class="control-actions group-actions"><div class="group-action-row"><button type="button" class="secondary edit-group" aria-label="Edit ${escapeHtml(group.name)}">Edit</button><button type="button" class="collapse-group ${collapsed ? 'is-collapsed' : ''}" title="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(group.name)}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(group.name)}" aria-expanded="${!collapsed}"><span class="collapse-icon" aria-hidden="true"></span></button></div><div class="group-action-row"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(group.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(group.name)} down">&darr;</button>${toggleMarkup(group.name, allEnabled, state.connected, 'group-switch')}</div></div>`;
     addOrderControls(groupRow, 'group', group.id, index, rootItems.length);
     groupRow.querySelector('.collapse-group').addEventListener('click', () => {
       toggleGroupCollapsed(state.config.activeServerId || '', group.id);
@@ -214,10 +214,12 @@ async function moveItem(type, id, direction) {
 
 function escapeHtml(value) { const div = document.createElement('div'); div.textContent = value; return div.innerHTML; }
 function normalizeEvent(event) {
+  const createdAt = new Date(event?.createdAt);
   return {
     id: String(event?.id || `${Date.now()}:${Math.random()}`),
     title: String(event?.title || 'Map event').slice(0, 160),
     body: String(event?.body || '').slice(0, 600),
+    createdAt: Number.isNaN(createdAt.getTime()) ? new Date().toISOString() : createdAt.toISOString(),
   };
 }
 function storedEvents() {
@@ -238,7 +240,9 @@ function saveEvent(event) {
 }
 function renderEvent(event, prepend = true) {
   const item = document.createElement('p');
-  item.innerHTML = `<strong>${escapeHtml(event.title)}</strong> ${escapeHtml(event.body)}`;
+  const date = new Date(event.createdAt);
+  const time = date.toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  item.innerHTML = `<span><strong>${escapeHtml(event.title)}</strong> ${escapeHtml(event.body)}</span><time datetime="${date.toISOString()}">${escapeHtml(time)}</time>`;
   if (prepend) eventList.prepend(item);
   else eventList.append(item);
   while (eventList.children.length > MAX_STORED_EVENTS) eventList.lastElementChild.remove();
