@@ -16,6 +16,16 @@ Use this file for confirmed, project-specific lessons. Add entries in reverse ch
 **Evidence:** User feedback, test, review finding, or verification result.
 ```
 
+## 2026-08-21 - Verify compact collection transforms parse
+
+**Context:** Adding persisted switch-group normalization in `server.js`.
+
+**What went wrong:** A dense nested `map`/`filter`/`Set` expression omitted a closing parenthesis and made the server fail its syntax check.
+
+**Required behavior:** Run `node --check server.js` after editing nested collection expressions and keep them formatted enough to make delimiter matching reviewable.
+
+**Evidence:** `node --check server.js` reported `SyntaxError: missing ) after argument list` at the group normalization expression.
+
 ## 2026-08-20 - Rust+ pairing tokens are not self-service manual input
 
 **Context:** Planning Rust+ onboarding for ordinary players rather than Rust server administrators.

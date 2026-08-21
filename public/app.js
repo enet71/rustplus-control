@@ -4,6 +4,8 @@ const feedback = document.querySelector('#feedback');
 const eventList = document.querySelector('#event-list');
 const notificationButton = document.querySelector('#enable-notifications');
 const notificationState = document.querySelector('#notification-state');
+const groupList = document.querySelector('#group-list');
+const createGroupButton = document.querySelector('#create-group');
 const pairingSection = document.querySelector('#pairing');
 const pairingStatus = document.querySelector('#pairing-status');
 const registerButton = document.querySelector('#register-rustplus');
@@ -16,12 +18,22 @@ const deviceDialog = document.querySelector('#device-dialog');
 const deviceForm = document.querySelector('#device-form');
 const deviceName = document.querySelector('#device-name');
 const saveDeviceName = document.querySelector('#save-device-name');
+const groupDialog = document.querySelector('#group-dialog');
+const groupForm = document.querySelector('#group-form');
+const groupDialogTitle = document.querySelector('#group-dialog-title');
+const groupName = document.querySelector('#group-name');
+const groupMembers = document.querySelector('#group-members');
+const saveGroup = document.querySelector('#save-group');
+const deleteGroupButton = document.querySelector('#delete-group');
 const serverSelect = document.querySelector('#server-select');
 const signOutButton = document.querySelector('#sign-out');
 let activePairing = null;
 let activeDevice = null;
+let activeGroup = null;
+let currentState = null;
 
 function render(state) {
+  currentState = state;
   connection.textContent = state.message;
   connection.className = `status ${state.connected ? 'online' : ''}`;
   serverSelect.innerHTML = '';
@@ -29,6 +41,7 @@ function render(state) {
   for (const server of state.config.servers) serverSelect.add(new Option(server.name, server.id));
   serverSelect.value = state.config.activeServerId || '';
   serverSelect.disabled = !state.config.servers.length;
+  renderGroups(state);
   devices.innerHTML = '';
   for (const device of state.config.devices) {
     const enabled = state.deviceStates[device.entityId];
@@ -42,6 +55,26 @@ function render(state) {
     devices.append(card);
   }
   if (!state.config.devices.length) devices.innerHTML = '<p class="empty">Pair a Smart Switch or Smart Alarm in Rust to add it here.</p>';
+}
+
+function renderGroups(state) {
+  const switches = state.config.devices.filter((device) => device.type !== 'alarm');
+  createGroupButton.disabled = !switches.length;
+  groupList.innerHTML = '';
+  for (const group of state.config.groups || []) {
+    const allEnabled = group.deviceIds.every((entityId) => state.deviceStates[entityId] === true);
+    const card = document.createElement('article');
+    card.className = 'group-card';
+    card.innerHTML = `<div><h3>${escapeHtml(group.name)}</h3><p>${group.deviceIds.length} switch${group.deviceIds.length === 1 ? '' : 'es'}</p></div><div class="group-actions"><button type="button" class="secondary edit-group" aria-label="Edit ${escapeHtml(group.name)}">Edit</button><button type="button" class="power group-switch ${allEnabled ? 'active' : ''}" ${state.connected ? '' : 'disabled'} aria-label="Toggle ${escapeHtml(group.name)}">${allEnabled ? 'ON' : 'OFF'}</button></div>`;
+    card.querySelector('.edit-group').addEventListener('click', () => openGroupEditor(group));
+    const switchButton = card.querySelector('.group-switch');
+    switchButton.addEventListener('click', async () => {
+      switchButton.disabled = true;
+      await toggleGroup(group.id, !allEnabled);
+    });
+    groupList.append(card);
+  }
+  if (!state.config.groups?.length) groupList.innerHTML = '<p class="empty">No switch groups yet.</p>';
 }
 
 async function toggle(entityId, enabled) {
@@ -88,6 +121,33 @@ function openDeviceEditor(device) {
   deviceName.focus();
 }
 
+function openGroupEditor(group = null) {
+  if (!currentState) return;
+  activeGroup = group;
+  const selectedIds = new Set(group?.deviceIds || []);
+  groupDialogTitle.textContent = group ? 'Edit switch group' : 'New switch group';
+  groupName.value = group?.name || '';
+  deleteGroupButton.hidden = !group;
+  groupMembers.innerHTML = '<legend>Switches</legend>';
+  for (const device of currentState.config.devices.filter((item) => item.type !== 'alarm')) {
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = device.entityId;
+    input.checked = selectedIds.has(device.entityId);
+    label.append(input, document.createTextNode(device.name));
+    groupMembers.append(label);
+  }
+  groupDialog.showModal();
+  groupName.focus();
+}
+
+async function toggleGroup(groupId, enabled) {
+  const result = await apiFetch(`/api/groups/${encodeURIComponent(groupId)}/switch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) });
+  if (!result.ok) feedback.textContent = (await result.json()).error || 'Unable to switch group.';
+  await refresh();
+}
+
 function escapeHtml(value) { const div = document.createElement('div'); div.textContent = value; return div.innerHTML; }
 function updateNotificationState() {
   if (!('Notification' in window)) { notificationState.textContent = 'Browser notifications are not supported.'; notificationButton.disabled = true; return; }
@@ -115,6 +175,8 @@ document.querySelector('#reject-pairing').addEventListener('click', async () => 
   pairingDialog.close(); activePairing = null; refreshPendingPairings();
 });
 document.querySelector('#cancel-device-edit').addEventListener('click', () => { deviceDialog.close(); activeDevice = null; });
+createGroupButton.addEventListener('click', () => openGroupEditor());
+document.querySelector('#cancel-group-edit').addEventListener('click', () => { groupDialog.close(); activeGroup = null; });
 pairingForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!activePairing) return;
@@ -131,6 +193,28 @@ deviceForm.addEventListener('submit', async (event) => {
   if (!result.ok) { feedback.textContent = (await result.json()).error || 'Unable to rename device.'; return; }
   deviceDialog.close();
   activeDevice = null;
+  await refresh();
+});
+groupForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const deviceIds = [...groupMembers.querySelectorAll('input:checked')].map((input) => input.value);
+  const url = activeGroup ? `/api/groups/${encodeURIComponent(activeGroup.id)}` : '/api/groups';
+  saveGroup.disabled = true;
+  const result = await apiFetch(url, { method: activeGroup ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: groupName.value.trim(), deviceIds }) });
+  saveGroup.disabled = false;
+  if (!result.ok) { feedback.textContent = (await result.json()).error || 'Unable to save group.'; return; }
+  groupDialog.close();
+  activeGroup = null;
+  await refresh();
+});
+deleteGroupButton.addEventListener('click', async () => {
+  if (!activeGroup) return;
+  deleteGroupButton.disabled = true;
+  const result = await apiFetch(`/api/groups/${encodeURIComponent(activeGroup.id)}`, { method: 'DELETE' });
+  deleteGroupButton.disabled = false;
+  if (!result.ok) { feedback.textContent = (await result.json()).error || 'Unable to delete group.'; return; }
+  groupDialog.close();
+  activeGroup = null;
   await refresh();
 });
 refresh(); setInterval(refresh, 3000);

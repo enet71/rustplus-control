@@ -59,7 +59,7 @@ function loadConfig() {
     if (Array.isArray(loaded.servers)) return { activeServerId: loaded.activeServerId || loaded.servers[0]?.id || null, servers: loaded.servers };
     if (loaded.server?.host) {
       const id = 'legacy-server';
-      const migrated = { activeServerId: id, servers: [{ id, name: 'Rust server', server: loaded.server, devices: loaded.devices || [] }] };
+      const migrated = { activeServerId: id, servers: [{ id, name: 'Rust server', server: loaded.server, devices: loaded.devices || [], groups: [] }] };
       fs.writeFileSync(CONFIG_PATH, JSON.stringify(migrated, null, 2), { mode: 0o600 });
       return migrated;
     }
@@ -89,9 +89,24 @@ function publicConfig() {
   return {
     server: { ...server, hasPlayerToken: Boolean(playerToken) },
     devices: profile?.devices || [],
+    groups: profile?.groups || [],
     activeServerId: config.activeServerId,
     servers: config.servers.map((item) => ({ id: item.id, name: item.name, host: item.server.host, connected: item.id === config.activeServerId && status.connected })),
   };
+}
+
+function groupInput(body, profile) {
+  const name = String(body?.name || '').trim();
+  const deviceIds = Array.isArray(body?.deviceIds) ? [...new Set(body.deviceIds.map((id) => String(id)))] : null;
+  const switchIds = new Set((profile.devices || []).filter((device) => device.type !== 'alarm').map((device) => String(device.entityId)));
+  if (!name || name.length > 80) return { error: 'Group name must be between 1 and 80 characters.' };
+  if (!deviceIds?.length || deviceIds.some((id) => !switchIds.has(id))) return { error: 'A group must contain one or more known switches.' };
+  return { name, deviceIds };
+}
+
+function reconcileGroups(groups, devices) {
+  const switchIds = new Set(devices.filter((device) => device.type !== 'alarm').map((device) => String(device.entityId)));
+  return (groups || []).map((group) => ({ ...group, deviceIds: [...new Set((group.deviceIds || []).map((id) => String(id)).filter((id) => switchIds.has(id)))] })).filter((group) => group.deviceIds.length);
 }
 
 function publishEntityState(entityId, value) {
@@ -121,7 +136,7 @@ function handlePairing(data) {
   if (pairing.type === 'server') {
     const id = String(pairing.id || `${pairing.ip}:${pairing.port}`);
     const existing = config.servers.find((item) => item.id === id);
-    const profile = { id, name: pairing.name || pairing.ip, server: { host: String(pairing.ip), port: String(pairing.port), playerId: String(pairing.playerId), playerToken: String(pairing.playerToken), useProxy: false }, devices: existing?.devices || [] };
+    const profile = { id, name: pairing.name || pairing.ip, server: { host: String(pairing.ip), port: String(pairing.port), playerId: String(pairing.playerId), playerToken: String(pairing.playerToken), useProxy: false }, devices: existing?.devices || [], groups: existing?.groups || [] };
     saveConfig({ ...config, activeServerId: id, servers: [...config.servers.filter((item) => item.id !== id), profile] });
     publishEvent({ id: `pair-server:${Date.now()}`, title: 'Rust+ server paired', body: pairing.name || pairing.ip, type: 'pairing', createdAt: new Date().toISOString() });
     connect();
@@ -375,7 +390,7 @@ app.put('/api/config', (request, response) => {
   const server = body.server || {};
   let profile = activeProfile();
   if (!profile) {
-    profile = { id: `manual-${Date.now()}`, name: 'Manual server', server: {}, devices: [] };
+    profile = { id: `manual-${Date.now()}`, name: 'Manual server', server: {}, devices: [], groups: [] };
     saveConfig({ ...config, activeServerId: profile.id, servers: [...config.servers, profile] });
   }
   const playerToken = String(server.playerToken || profile.server.playerToken || '');
@@ -386,7 +401,8 @@ app.put('/api/config', (request, response) => {
   if (!Array.isArray(devices) || devices.some((device) => !device.name || !/^-?\d+$/.test(String(device.entityId)))) {
     return response.status(400).json({ error: 'Each device needs a name and numeric entity ID.' });
   }
-  setActiveProfile({ ...profile, server: { host: String(server.host), port: String(server.port), playerId: String(server.playerId), playerToken, useProxy: Boolean(server.useProxy) }, devices: devices.map((device) => ({ name: String(device.name), entityId: String(device.entityId), type: device.type === 'alarm' ? 'alarm' : 'switch' })) });
+  const savedDevices = devices.map((device) => ({ name: String(device.name), entityId: String(device.entityId), type: device.type === 'alarm' ? 'alarm' : 'switch' }));
+  setActiveProfile({ ...profile, server: { host: String(server.host), port: String(server.port), playerId: String(server.playerId), playerToken, useProxy: Boolean(server.useProxy) }, devices: savedDevices, groups: reconcileGroups(profile.groups, savedDevices) });
   deviceStates = {};
   connect();
   response.json({ ok: true });
@@ -415,6 +431,50 @@ app.patch('/api/devices/:entityId', (request, response) => {
   if (!device) return response.status(404).json({ error: 'Unknown device.' });
   setActiveProfile({ ...profile, devices: profile.devices.map((item) => item.entityId === entityId ? { ...item, name } : item) });
   response.json({ ok: true });
+});
+
+app.post('/api/groups', (request, response) => {
+  const profile = activeProfile();
+  if (!profile) return response.status(404).json({ error: 'No active server.' });
+  const input = groupInput(request.body, profile);
+  if (input.error) return response.status(400).json({ error: input.error });
+  const group = { id: crypto.randomUUID(), ...input };
+  setActiveProfile({ ...profile, groups: [...(profile.groups || []), group] });
+  response.status(201).json({ group });
+});
+
+app.patch('/api/groups/:id', (request, response) => {
+  const profile = activeProfile();
+  if (!profile) return response.status(404).json({ error: 'No active server.' });
+  const groups = profile.groups || [];
+  if (!groups.some((group) => group.id === request.params.id)) return response.status(404).json({ error: 'Unknown group.' });
+  const input = groupInput(request.body, profile);
+  if (input.error) return response.status(400).json({ error: input.error });
+  setActiveProfile({ ...profile, groups: groups.map((group) => group.id === request.params.id ? { ...group, ...input } : group) });
+  response.json({ ok: true });
+});
+
+app.delete('/api/groups/:id', (request, response) => {
+  const profile = activeProfile();
+  if (!profile) return response.status(404).json({ error: 'No active server.' });
+  const groups = profile.groups || [];
+  if (!groups.some((group) => group.id === request.params.id)) return response.status(404).json({ error: 'Unknown group.' });
+  setActiveProfile({ ...profile, groups: groups.filter((group) => group.id !== request.params.id) });
+  response.status(204).end();
+});
+
+app.post('/api/groups/:id/switch', (request, response) => {
+  const enabled = request.body?.enabled;
+  if (typeof enabled !== 'boolean') return response.status(400).json({ error: 'enabled must be boolean.' });
+  if (!client || !status.connected) return response.status(409).json({ error: 'Rust+ is not connected.' });
+  const group = (activeProfile()?.groups || []).find((item) => item.id === request.params.id);
+  if (!group) return response.status(404).json({ error: 'Unknown group.' });
+  for (const entityId of group.deviceIds) {
+    client.setEntityValue(entityId, enabled, (message) => {
+      if (!message.response?.error) publishEntityState(entityId, enabled);
+    });
+  }
+  response.status(202).json({ ok: true });
 });
 
 app.listen(PORT, HOST, () => {
