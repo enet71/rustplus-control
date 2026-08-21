@@ -95,18 +95,54 @@ function publicConfig() {
   };
 }
 
-function groupInput(body, profile) {
+function groupInput(body, profile, currentGroupId = null) {
   const name = String(body?.name || '').trim();
   const deviceIds = Array.isArray(body?.deviceIds) ? [...new Set(body.deviceIds.map((id) => String(id)))] : null;
   const switchIds = new Set((profile.devices || []).filter((device) => device.type !== 'alarm').map((device) => String(device.entityId)));
+  const groupedIds = new Set((profile.groups || []).filter((group) => group.id !== currentGroupId).flatMap((group) => group.deviceIds || []));
   if (!name || name.length > 80) return { error: 'Group name must be between 1 and 80 characters.' };
   if (!deviceIds?.length || deviceIds.some((id) => !switchIds.has(id))) return { error: 'A group must contain one or more known switches.' };
+  if (deviceIds.some((id) => groupedIds.has(id))) return { error: 'A switch can belong to only one group.' };
   return { name, deviceIds };
 }
 
 function reconcileGroups(groups, devices) {
   const switchIds = new Set(devices.filter((device) => device.type !== 'alarm').map((device) => String(device.entityId)));
   return (groups || []).map((group) => ({ ...group, deviceIds: [...new Set((group.deviceIds || []).map((id) => String(id)).filter((id) => switchIds.has(id)))] })).filter((group) => group.deviceIds.length);
+}
+
+function sortOrder(item, fallback) {
+  const value = Number(item.sortOrder);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function ordered(items) {
+  return [...items].sort((left, right) => sortOrder(left.item, left.index) - sortOrder(right.item, right.index));
+}
+
+function nextSortOrder(profile) {
+  const items = [...(profile.groups || []), ...(profile.devices || [])];
+  return Math.max(-1, ...items.map((item, index) => sortOrder(item, index))) + 1;
+}
+
+function moveProfileItem(profile, type, id, direction) {
+  const devices = profile.devices || [];
+  const groups = profile.groups || [];
+  const parent = type === 'device' ? groups.find((group) => group.deviceIds.includes(id)) : null;
+  const items = parent
+    ? parent.deviceIds.map((entityId, index) => ({ item: devices.find((device) => device.entityId === entityId), index })).filter((entry) => entry.item)
+    : [...groups.map((item, index) => ({ item, index, type: 'group' })), ...devices.filter((device) => !groups.some((group) => group.deviceIds.includes(device.entityId))).map((item, index) => ({ item, index: groups.length + index, type: 'device' }))];
+  const orderedItems = ordered(items);
+  const position = orderedItems.findIndex((entry) => entry.item.id === id || entry.item.entityId === id);
+  const target = position + direction;
+  if (position < 0 || target < 0 || target >= orderedItems.length) return null;
+  [orderedItems[position], orderedItems[target]] = [orderedItems[target], orderedItems[position]];
+  const orderById = new Map(orderedItems.map((entry, index) => [entry.item.id || entry.item.entityId, index]));
+  return {
+    ...profile,
+    groups: groups.map((group) => orderById.has(group.id) ? { ...group, sortOrder: orderById.get(group.id) } : group),
+    devices: devices.map((device) => orderById.has(device.entityId) ? { ...device, sortOrder: orderById.get(device.entityId) } : device),
+  };
 }
 
 function publishEntityState(entityId, value) {
@@ -124,7 +160,7 @@ function addPairedDevice(pairing) {
   if (!profile) return;
   const devices = profile.devices || [];
   if (!devices.some((device) => device.entityId === entityId)) {
-    saveConfig({ ...config, servers: config.servers.map((item) => item.id === profile.id ? { ...profile, devices: [...devices, { name, entityId, type }] } : item) });
+    saveConfig({ ...config, servers: config.servers.map((item) => item.id === profile.id ? { ...profile, devices: [...devices, { name, entityId, type, sortOrder: nextSortOrder(profile) }] } : item) });
   }
 }
 
@@ -401,7 +437,10 @@ app.put('/api/config', (request, response) => {
   if (!Array.isArray(devices) || devices.some((device) => !device.name || !/^-?\d+$/.test(String(device.entityId)))) {
     return response.status(400).json({ error: 'Each device needs a name and numeric entity ID.' });
   }
-  const savedDevices = devices.map((device) => ({ name: String(device.name), entityId: String(device.entityId), type: device.type === 'alarm' ? 'alarm' : 'switch' }));
+  const savedDevices = devices.map((device, index) => {
+    const existing = (profile.devices || []).find((item) => item.entityId === String(device.entityId));
+    return { name: String(device.name), entityId: String(device.entityId), type: device.type === 'alarm' ? 'alarm' : 'switch', sortOrder: sortOrder(existing || {}, index) };
+  });
   setActiveProfile({ ...profile, server: { host: String(server.host), port: String(server.port), playerId: String(server.playerId), playerToken, useProxy: Boolean(server.useProxy) }, devices: savedDevices, groups: reconcileGroups(profile.groups, savedDevices) });
   deviceStates = {};
   connect();
@@ -438,7 +477,7 @@ app.post('/api/groups', (request, response) => {
   if (!profile) return response.status(404).json({ error: 'No active server.' });
   const input = groupInput(request.body, profile);
   if (input.error) return response.status(400).json({ error: input.error });
-  const group = { id: crypto.randomUUID(), ...input };
+  const group = { id: crypto.randomUUID(), sortOrder: nextSortOrder(profile), ...input };
   setActiveProfile({ ...profile, groups: [...(profile.groups || []), group] });
   response.status(201).json({ group });
 });
@@ -448,7 +487,7 @@ app.patch('/api/groups/:id', (request, response) => {
   if (!profile) return response.status(404).json({ error: 'No active server.' });
   const groups = profile.groups || [];
   if (!groups.some((group) => group.id === request.params.id)) return response.status(404).json({ error: 'Unknown group.' });
-  const input = groupInput(request.body, profile);
+  const input = groupInput(request.body, profile, request.params.id);
   if (input.error) return response.status(400).json({ error: input.error });
   setActiveProfile({ ...profile, groups: groups.map((group) => group.id === request.params.id ? { ...group, ...input } : group) });
   response.json({ ok: true });
@@ -475,6 +514,18 @@ app.post('/api/groups/:id/switch', (request, response) => {
     });
   }
   response.status(202).json({ ok: true });
+});
+
+app.post('/api/items/:type/:id/move', (request, response) => {
+  const type = request.params.type;
+  const direction = request.body?.direction;
+  if (!['group', 'device'].includes(type) || ![-1, 1].includes(direction)) return response.status(400).json({ error: 'type and direction are invalid.' });
+  const profile = activeProfile();
+  if (!profile) return response.status(404).json({ error: 'No active server.' });
+  const nextProfile = moveProfileItem(profile, type, request.params.id, direction);
+  if (!nextProfile) return response.status(409).json({ error: 'Item cannot be moved further.' });
+  setActiveProfile(nextProfile);
+  response.json({ ok: true });
 });
 
 app.listen(PORT, HOST, () => {

@@ -1,10 +1,9 @@
 const connection = document.querySelector('#connection');
-const devices = document.querySelector('#devices');
+const controlList = document.querySelector('#control-list');
 const feedback = document.querySelector('#feedback');
 const eventList = document.querySelector('#event-list');
 const notificationButton = document.querySelector('#enable-notifications');
 const notificationState = document.querySelector('#notification-state');
-const groupList = document.querySelector('#group-list');
 const createGroupButton = document.querySelector('#create-group');
 const pairingSection = document.querySelector('#pairing');
 const pairingStatus = document.querySelector('#pairing-status');
@@ -41,43 +40,69 @@ function render(state) {
   for (const server of state.config.servers) serverSelect.add(new Option(server.name, server.id));
   serverSelect.value = state.config.activeServerId || '';
   serverSelect.disabled = !state.config.servers.length;
-  renderGroups(state);
-  devices.innerHTML = '';
-  for (const device of state.config.devices) {
-    const enabled = state.deviceStates[device.entityId];
-    const card = document.createElement('article');
-    card.className = 'device';
-    const isAlarm = device.type === 'alarm';
-    const stateLabel = enabled === undefined ? 'State unknown' : enabled ? isAlarm ? 'Alarm active' : 'Powered on' : isAlarm ? 'Monitoring' : 'Powered off';
-    card.innerHTML = `<div><h2>${escapeHtml(device.name)}</h2><p>${stateLabel}</p></div><div class="device-actions"><button type="button" class="secondary rename-device" aria-label="Rename ${escapeHtml(device.name)}">Rename</button>${isAlarm ? '<span class="alarm-status">ALARM</span>' : `<button ${state.connected ? '' : 'disabled'} class="power ${enabled ? 'active' : ''}" aria-label="Toggle ${escapeHtml(device.name)}">${enabled ? 'ON' : 'OFF'}</button>`}</div>`;
-    card.querySelector('.rename-device').addEventListener('click', () => openDeviceEditor(device));
-    if (!isAlarm) card.querySelector('.power').addEventListener('click', () => toggle(device.entityId, !enabled));
-    devices.append(card);
-  }
-  if (!state.config.devices.length) devices.innerHTML = '<p class="empty">Pair a Smart Switch or Smart Alarm in Rust to add it here.</p>';
+  renderControls(state);
 }
 
-function renderGroups(state) {
+function sortItems(items) {
+  return [...items].sort((left, right) => Number(left.sortOrder || 0) - Number(right.sortOrder || 0));
+}
+
+function toggleMarkup(name, enabled, connected, className) {
+  return `<button type="button" class="toggle-switch ${className} ${enabled ? 'is-on' : ''}" role="switch" aria-checked="${enabled}" aria-label="Toggle ${escapeHtml(name)}" ${connected ? '' : 'disabled'}><span></span></button>`;
+}
+
+function addOrderControls(row, type, id, position, count) {
+  const up = row.querySelector('.move-up');
+  const down = row.querySelector('.move-down');
+  up.disabled = position === 0;
+  down.disabled = position === count - 1;
+  up.addEventListener('click', () => moveItem(type, id, -1));
+  down.addEventListener('click', () => moveItem(type, id, 1));
+}
+
+function renderDeviceRow(device, state, position, count, child = false) {
+  const enabled = state.deviceStates[device.entityId];
+  const isAlarm = device.type === 'alarm';
+  const stateLabel = enabled === undefined ? 'State unknown' : enabled ? isAlarm ? 'Alarm active' : 'Powered on' : isAlarm ? 'Monitoring' : 'Powered off';
+  const row = document.createElement('article');
+  row.className = `control-row ${child ? 'group-child' : ''}`;
+  row.innerHTML = `<div class="control-info"><h3>${escapeHtml(device.name)}</h3><p>${stateLabel}</p></div><div class="control-actions"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(device.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(device.name)} down">&darr;</button><button type="button" class="secondary rename-device" aria-label="Rename ${escapeHtml(device.name)}">Rename</button>${isAlarm ? '<span class="alarm-status">ALARM</span>' : toggleMarkup(device.name, enabled === true, state.connected, 'device-switch')}</div>`;
+  addOrderControls(row, 'device', device.entityId, position, count);
+  row.querySelector('.rename-device').addEventListener('click', () => openDeviceEditor(device));
+  if (!isAlarm) row.querySelector('.device-switch').addEventListener('click', (event) => toggle(device.entityId, enabled !== true, event.currentTarget));
+  return row;
+}
+
+function renderControls(state) {
   const switches = state.config.devices.filter((device) => device.type !== 'alarm');
   createGroupButton.disabled = !switches.length;
-  groupList.innerHTML = '';
-  for (const group of state.config.groups || []) {
+  controlList.innerHTML = '';
+  const groups = state.config.groups || [];
+  const groupedIds = new Set(groups.flatMap((group) => group.deviceIds));
+  const rootItems = sortItems([...groups.map((group) => ({ ...group, itemType: 'group' })), ...state.config.devices.filter((device) => !groupedIds.has(device.entityId)).map((device) => ({ ...device, itemType: 'device' }))]);
+  for (let index = 0; index < rootItems.length; index += 1) {
+    const item = rootItems[index];
+    if (item.itemType === 'device') {
+      controlList.append(renderDeviceRow(item, state, index, rootItems.length));
+      continue;
+    }
+    const group = item;
     const allEnabled = group.deviceIds.every((entityId) => state.deviceStates[entityId] === true);
-    const card = document.createElement('article');
-    card.className = 'group-card';
-    card.innerHTML = `<div><h3>${escapeHtml(group.name)}</h3><p>${group.deviceIds.length} switch${group.deviceIds.length === 1 ? '' : 'es'}</p></div><div class="group-actions"><button type="button" class="secondary edit-group" aria-label="Edit ${escapeHtml(group.name)}">Edit</button><button type="button" class="power group-switch ${allEnabled ? 'active' : ''}" ${state.connected ? '' : 'disabled'} aria-label="Toggle ${escapeHtml(group.name)}">${allEnabled ? 'ON' : 'OFF'}</button></div>`;
-    card.querySelector('.edit-group').addEventListener('click', () => openGroupEditor(group));
-    const switchButton = card.querySelector('.group-switch');
-    switchButton.addEventListener('click', async () => {
-      switchButton.disabled = true;
-      await toggleGroup(group.id, !allEnabled);
-    });
-    groupList.append(card);
+    const groupRow = document.createElement('article');
+    groupRow.className = 'control-row group-row';
+    groupRow.innerHTML = `<div class="control-info"><h3>${escapeHtml(group.name)}</h3><p>${group.deviceIds.length} switch${group.deviceIds.length === 1 ? '' : 'es'}</p></div><div class="control-actions"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(group.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(group.name)} down">&darr;</button><button type="button" class="secondary edit-group" aria-label="Edit ${escapeHtml(group.name)}">Edit</button>${toggleMarkup(group.name, allEnabled, state.connected, 'group-switch')}</div>`;
+    addOrderControls(groupRow, 'group', group.id, index, rootItems.length);
+    groupRow.querySelector('.edit-group').addEventListener('click', () => openGroupEditor(group));
+    groupRow.querySelector('.group-switch').addEventListener('click', (event) => toggleGroup(group.id, !allEnabled, event.currentTarget));
+    controlList.append(groupRow);
+    const children = sortItems(group.deviceIds.map((entityId) => state.config.devices.find((device) => device.entityId === entityId)).filter(Boolean));
+    children.forEach((device, childIndex) => controlList.append(renderDeviceRow(device, state, childIndex, children.length, true)));
   }
-  if (!state.config.groups?.length) groupList.innerHTML = '<p class="empty">No switch groups yet.</p>';
+  if (!rootItems.length) controlList.innerHTML = '<p class="empty">Pair a Smart Switch or Smart Alarm in Rust to add it here.</p>';
 }
 
-async function toggle(entityId, enabled) {
+async function toggle(entityId, enabled, control) {
+  control.disabled = true;
   const result = await apiFetch(`/api/devices/${encodeURIComponent(entityId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) });
   if (!result.ok) feedback.textContent = (await result.json()).error || 'Command failed.';
   await refresh();
@@ -125,6 +150,7 @@ function openGroupEditor(group = null) {
   if (!currentState) return;
   activeGroup = group;
   const selectedIds = new Set(group?.deviceIds || []);
+  const groupedIds = new Set((currentState.config.groups || []).filter((item) => item.id !== group?.id).flatMap((item) => item.deviceIds));
   groupDialogTitle.textContent = group ? 'Edit switch group' : 'New switch group';
   groupName.value = group?.name || '';
   deleteGroupButton.hidden = !group;
@@ -135,6 +161,7 @@ function openGroupEditor(group = null) {
     input.type = 'checkbox';
     input.value = device.entityId;
     input.checked = selectedIds.has(device.entityId);
+    input.disabled = groupedIds.has(device.entityId);
     label.append(input, document.createTextNode(device.name));
     groupMembers.append(label);
   }
@@ -142,9 +169,16 @@ function openGroupEditor(group = null) {
   groupName.focus();
 }
 
-async function toggleGroup(groupId, enabled) {
+async function toggleGroup(groupId, enabled, control) {
+  control.disabled = true;
   const result = await apiFetch(`/api/groups/${encodeURIComponent(groupId)}/switch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) });
   if (!result.ok) feedback.textContent = (await result.json()).error || 'Unable to switch group.';
+  await refresh();
+}
+
+async function moveItem(type, id, direction) {
+  const result = await apiFetch(`/api/items/${encodeURIComponent(type)}/${encodeURIComponent(id)}/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }) });
+  if (!result.ok) feedback.textContent = (await result.json()).error || 'Unable to move item.';
   await refresh();
 }
 
