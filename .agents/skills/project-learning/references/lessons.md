@@ -25,3 +25,13 @@ Use this file for confirmed, project-specific lessons. Add entries in reverse ch
 **Required behavior:** Treat FCM pairing as required for ordinary-player self-service onboarding. Mention manual token entry only for server administrators who can read `player.tokens.db` or another explicitly trusted source.
 
 **Evidence:** The installed `@liamcottle/rustplus.js` pairing documentation states that pairing notifications carry `playerId` and `playerToken`; its manual lookup procedure is specifically for Rust server administrators with access to `player.tokens.db`.
+
+## 2026-08-21 - Patch the specific Rust+ protobuf message
+
+**Context:** Handling missing optional team-member fields sent by current Rust+ servers.
+
+**What went wrong:** The protobuf patch matched the first `message Member` declaration instead of `AppTeamInfo.Member`, so `isOnline` remained required in the production image.
+
+**Required behavior:** Anchor protobuf patches to the enclosing message and verify the expected field is optional in the resulting file or running container.
+
+**Evidence:** Production logs raised `ProtocolError: missing required 'isOnline'`; inspection of the container showed `required bool isOnline = 5` after a successful image build.
