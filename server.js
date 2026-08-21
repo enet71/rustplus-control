@@ -405,6 +405,18 @@ app.post('/api/devices/:entityId', (request, response) => {
   response.status(202).json({ ok: true });
 });
 
+app.patch('/api/devices/:entityId', (request, response) => {
+  const entityId = String(request.params.entityId);
+  const name = String(request.body?.name || '').trim();
+  if (!name || name.length > 80) return response.status(400).json({ error: 'Device name must be between 1 and 80 characters.' });
+  const profile = activeProfile();
+  if (!profile) return response.status(404).json({ error: 'No active server.' });
+  const device = (profile.devices || []).find((item) => item.entityId === entityId);
+  if (!device) return response.status(404).json({ error: 'Unknown device.' });
+  setActiveProfile({ ...profile, devices: profile.devices.map((item) => item.entityId === entityId ? { ...item, name } : item) });
+  response.json({ ok: true });
+});
+
 app.listen(PORT, HOST, () => {
   console.log(`Rust+ Control is running at http://${HOST}:${PORT}`);
   if (fcmStatus.registered) {

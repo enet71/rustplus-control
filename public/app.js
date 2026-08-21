@@ -12,9 +12,14 @@ const pairingForm = document.querySelector('#pairing-form');
 const pairingDeviceId = document.querySelector('#pairing-device-id');
 const pairingDeviceName = document.querySelector('#pairing-device-name');
 const pairingDeviceType = document.querySelector('#pairing-device-type');
+const deviceDialog = document.querySelector('#device-dialog');
+const deviceForm = document.querySelector('#device-form');
+const deviceName = document.querySelector('#device-name');
+const saveDeviceName = document.querySelector('#save-device-name');
 const serverSelect = document.querySelector('#server-select');
 const signOutButton = document.querySelector('#sign-out');
 let activePairing = null;
+let activeDevice = null;
 
 function render(state) {
   connection.textContent = state.message;
@@ -31,8 +36,9 @@ function render(state) {
     card.className = 'device';
     const isAlarm = device.type === 'alarm';
     const stateLabel = enabled === undefined ? 'State unknown' : enabled ? isAlarm ? 'Alarm active' : 'Powered on' : isAlarm ? 'Monitoring' : 'Powered off';
-    card.innerHTML = `<div><h2>${escapeHtml(device.name)}</h2><p>${stateLabel}</p></div>${isAlarm ? '<span class="alarm-status">ALARM</span>' : `<button ${state.connected ? '' : 'disabled'} class="power ${enabled ? 'active' : ''}" aria-label="Toggle ${escapeHtml(device.name)}">${enabled ? 'ON' : 'OFF'}</button>`}`;
-    if (!isAlarm) card.querySelector('button').addEventListener('click', () => toggle(device.entityId, !enabled));
+    card.innerHTML = `<div><h2>${escapeHtml(device.name)}</h2><p>${stateLabel}</p></div><div class="device-actions"><button type="button" class="secondary rename-device" aria-label="Rename ${escapeHtml(device.name)}">Rename</button>${isAlarm ? '<span class="alarm-status">ALARM</span>' : `<button ${state.connected ? '' : 'disabled'} class="power ${enabled ? 'active' : ''}" aria-label="Toggle ${escapeHtml(device.name)}">${enabled ? 'ON' : 'OFF'}</button>`}</div>`;
+    card.querySelector('.rename-device').addEventListener('click', () => openDeviceEditor(device));
+    if (!isAlarm) card.querySelector('.power').addEventListener('click', () => toggle(device.entityId, !enabled));
     devices.append(card);
   }
   if (!state.config.devices.length) devices.innerHTML = '<p class="empty">Pair a Smart Switch or Smart Alarm in Rust to add it here.</p>';
@@ -75,6 +81,13 @@ function openPairing(pairing) {
   pairingDialog.showModal();
 }
 
+function openDeviceEditor(device) {
+  activeDevice = device;
+  deviceName.value = device.name;
+  deviceDialog.showModal();
+  deviceName.focus();
+}
+
 function escapeHtml(value) { const div = document.createElement('div'); div.textContent = value; return div.innerHTML; }
 function updateNotificationState() {
   if (!('Notification' in window)) { notificationState.textContent = 'Browser notifications are not supported.'; notificationButton.disabled = true; return; }
@@ -101,12 +114,24 @@ document.querySelector('#reject-pairing').addEventListener('click', async () => 
   if (activePairing) await apiFetch(`/api/pairings/${encodeURIComponent(activePairing.id)}`, { method: 'DELETE' });
   pairingDialog.close(); activePairing = null; refreshPendingPairings();
 });
+document.querySelector('#cancel-device-edit').addEventListener('click', () => { deviceDialog.close(); activeDevice = null; });
 pairingForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!activePairing) return;
   const result = await apiFetch(`/api/pairings/${encodeURIComponent(activePairing.id)}/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: pairingDeviceName.value.trim(), type: pairingDeviceType.value }) });
   if (!result.ok) { feedback.textContent = (await result.json()).error || 'Unable to add device.'; return; }
   pairingDialog.close(); activePairing = null; await refresh(); refreshPendingPairings();
+});
+deviceForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!activeDevice) return;
+  saveDeviceName.disabled = true;
+  const result = await apiFetch(`/api/devices/${encodeURIComponent(activeDevice.entityId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: deviceName.value.trim() }) });
+  saveDeviceName.disabled = false;
+  if (!result.ok) { feedback.textContent = (await result.json()).error || 'Unable to rename device.'; return; }
+  deviceDialog.close();
+  activeDevice = null;
+  await refresh();
 });
 refresh(); setInterval(refresh, 3000);
 refreshPairingStatus(); setInterval(refreshPairingStatus, 3000);
