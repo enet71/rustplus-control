@@ -305,6 +305,18 @@ function startFcmListener() {
   });
 }
 
+function restartFcmListener() {
+  const previousListener = fcmListenerProcess;
+  if (!previousListener) {
+    startFcmListener();
+    return;
+  }
+  fcmListenerProcess = null;
+  fcmStatus = { registered: true, listening: false, message: 'Restarting FCM listener' };
+  previousListener.once('close', () => startFcmListener());
+  if (!previousListener.kill()) startFcmListener();
+}
+
 function startFcmRegister() {
   if (fs.existsSync(FCM_CONFIG_PATH)) {
     fcmStatus = { registered: true, listening: Boolean(fcmListenerProcess), message: 'Rust+ is already registered' };
@@ -530,10 +542,7 @@ app.put('/api/settings', (request, response) => {
   fs.mkdirSync(path.dirname(FCM_CONFIG_PATH), { recursive: true });
   fs.writeFileSync(FCM_CONFIG_PATH, JSON.stringify(input.fcm, null, 2), { mode: 0o600 });
   setActiveProfile({ ...profile, name: input.server.name, server: { host: input.server.host, port: input.server.port, playerId: input.server.playerId, playerToken: input.server.playerToken, useProxy: input.server.useProxy } });
-  fcmListenerProcess?.kill();
-  fcmListenerProcess = null;
-  fcmStatus = { registered: true, listening: false, message: 'FCM settings updated' };
-  startFcmListener();
+  restartFcmListener();
   deviceStates = {};
   connect();
   return response.json({ ok: true });

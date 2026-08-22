@@ -2,6 +2,16 @@
 
 Use this file for confirmed, project-specific lessons. Add entries in reverse chronological order.
 
+## 2026-08-22 - Restart the FCM listener sequentially
+
+**Context:** Saving edited FCM settings in the dashboard.
+
+**What went wrong:** The settings endpoint killed the current FCM listener and immediately started a replacement, allowing two receivers to use the same credentials briefly and preventing reliable pairing notifications.
+
+**Required behavior:** Wait for the previous FCM listener process to close before starting its replacement after credential changes.
+
+**Evidence:** User reported that pairing stopped working after saving new settings.
+
 ## Entry format
 
 ```markdown
