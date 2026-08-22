@@ -91,6 +91,48 @@ function saveConfig(nextConfig) {
   config = nextConfig;
 }
 
+function loadFcmConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(FCM_CONFIG_PATH, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function settingString(value, name, maximum = 4096) {
+  const normalized = String(value || '').trim();
+  if (!normalized || normalized.length > maximum) return { error: `${name} is required and must be at most ${maximum} characters.` };
+  return { value: normalized };
+}
+
+function settingsInput(body) {
+  const server = body?.server || {};
+  const fcm = body?.fcm || {};
+  const name = settingString(server.name, 'Server name', 80);
+  const host = settingString(server.host, 'Host', 255);
+  const port = settingString(server.port, 'Port', 5);
+  const playerId = settingString(server.playerId, 'Steam64 ID', 32);
+  const playerToken = settingString(server.playerToken, 'Player token', 4096);
+  const androidId = settingString(fcm.androidId, 'FCM Android ID', 4096);
+  const securityToken = settingString(fcm.securityToken, 'FCM security token', 4096);
+  const fcmToken = settingString(fcm.token, 'FCM token', 8192);
+  const expoPushToken = settingString(fcm.expoPushToken, 'Expo push token', 4096);
+  const rustplusAuthToken = settingString(fcm.rustplusAuthToken, 'Rust+ auth token', 4096);
+  const values = [name, host, port, playerId, playerToken, androidId, securityToken, fcmToken, expoPushToken, rustplusAuthToken];
+  const invalid = values.find((entry) => entry.error);
+  if (invalid) return invalid;
+  if (!/^\d+$/.test(port.value) || Number(port.value) < 1 || Number(port.value) > 65535) return { error: 'Port must be between 1 and 65535.' };
+  if (!/^\d+$/.test(playerId.value)) return { error: 'Steam64 ID must contain only digits.' };
+  return {
+    server: { name: name.value, host: host.value, port: port.value, playerId: playerId.value, playerToken: playerToken.value, useProxy: Boolean(server.useProxy) },
+    fcm: {
+      fcm_credentials: { gcm: { androidId: androidId.value, securityToken: securityToken.value }, fcm: { token: fcmToken.value } },
+      expo_push_token: expoPushToken.value,
+      rustplus_auth_token: rustplusAuthToken.value,
+    },
+  };
+}
+
 function activeProfile() {
   return config.servers.find((server) => server.id === config.activeServerId) || null;
 }
@@ -243,10 +285,11 @@ function handlePairing(data) {
 
 function startFcmListener() {
   if (fcmListenerProcess) return;
-  fcmListenerProcess = spawn(process.execPath, [FCM_LISTENER_PATH, FCM_CONFIG_PATH], { cwd: __dirname });
+  const listener = spawn(process.execPath, [FCM_LISTENER_PATH, FCM_CONFIG_PATH], { cwd: __dirname });
+  fcmListenerProcess = listener;
   fcmStatus = { registered: true, listening: true, message: 'Listening for Rust+ pairing notifications' };
   let buffer = '';
-  fcmListenerProcess.stdout.on('data', (chunk) => {
+  listener.stdout.on('data', (chunk) => {
     buffer += chunk.toString();
     const lines = buffer.split('\n');
     buffer = lines.pop();
@@ -254,8 +297,9 @@ function startFcmListener() {
       try { handlePairing(JSON.parse(line)); } catch { /* Ignore non-JSON listener output. */ }
     }
   });
-  fcmListenerProcess.stderr.on('data', (chunk) => { fcmStatus.message = `Listener error: ${chunk.toString().trim()}`; });
-  fcmListenerProcess.on('close', (code) => {
+  listener.stderr.on('data', (chunk) => { if (fcmListenerProcess === listener) fcmStatus.message = `Listener error: ${chunk.toString().trim()}`; });
+  listener.on('close', (code) => {
+    if (fcmListenerProcess !== listener) return;
     fcmListenerProcess = null;
     fcmStatus = { registered: fs.existsSync(FCM_CONFIG_PATH), listening: false, message: `Listener stopped (${code ?? 'unknown'})` };
   });
@@ -463,6 +507,37 @@ function connect() {
 app.get('/api/auth/verify', (request, response) => response.json({ authenticated: true }));
 app.get('/api/state', (request, response) => response.json({ ...status, config: publicConfig(), deviceStates }));
 app.get('/api/fcm/status', (request, response) => response.json({ ...fcmStatus, registrationAvailable: FCM_REGISTRATION_AVAILABLE }));
+app.get('/api/settings', (request, response) => {
+  const profile = activeProfile();
+  const fcm = loadFcmConfig();
+  if (!profile || !fcm) return response.status(404).json({ error: 'Server and FCM settings must be configured first.' });
+  return response.json({
+    server: { name: profile.name, host: profile.server.host, port: profile.server.port, playerId: profile.server.playerId, playerToken: profile.server.playerToken, useProxy: Boolean(profile.server.useProxy) },
+    fcm: {
+      androidId: fcm.fcm_credentials?.gcm?.androidId || '',
+      securityToken: fcm.fcm_credentials?.gcm?.securityToken || '',
+      token: fcm.fcm_credentials?.fcm?.token || '',
+      expoPushToken: fcm.expo_push_token || '',
+      rustplusAuthToken: fcm.rustplus_auth_token || '',
+    },
+  });
+});
+app.put('/api/settings', (request, response) => {
+  const profile = activeProfile();
+  if (!profile) return response.status(404).json({ error: 'No active server.' });
+  const input = settingsInput(request.body);
+  if (input.error) return response.status(400).json({ error: input.error });
+  fs.mkdirSync(path.dirname(FCM_CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(FCM_CONFIG_PATH, JSON.stringify(input.fcm, null, 2), { mode: 0o600 });
+  setActiveProfile({ ...profile, name: input.server.name, server: { host: input.server.host, port: input.server.port, playerId: input.server.playerId, playerToken: input.server.playerToken, useProxy: input.server.useProxy } });
+  fcmListenerProcess?.kill();
+  fcmListenerProcess = null;
+  fcmStatus = { registered: true, listening: false, message: 'FCM settings updated' };
+  startFcmListener();
+  deviceStates = {};
+  connect();
+  return response.json({ ok: true });
+});
 app.post('/api/fcm/register', (request, response) => {
   if (!FCM_REGISTRATION_AVAILABLE) return response.status(403).json({ error: 'Rust+ registration is available only on a local installation.' });
   startFcmRegister();

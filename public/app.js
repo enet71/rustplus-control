@@ -10,6 +10,22 @@ const discordDialog = document.querySelector('#discord-dialog');
 const discordForm = document.querySelector('#discord-form');
 const discordWebhookUrl = document.querySelector('#discord-webhook-url');
 const saveDiscord = document.querySelector('#save-discord');
+const editSettingsButton = document.querySelector('#edit-settings');
+const settingsDialog = document.querySelector('#settings-dialog');
+const settingsForm = document.querySelector('#settings-form');
+const saveSettings = document.querySelector('#save-settings');
+const settingsServerName = document.querySelector('#settings-server-name');
+const settingsServerHost = document.querySelector('#settings-server-host');
+const settingsServerPort = document.querySelector('#settings-server-port');
+const settingsPlayerId = document.querySelector('#settings-player-id');
+const settingsPlayerToken = document.querySelector('#settings-player-token');
+const settingsUseProxy = document.querySelector('#settings-use-proxy');
+const settingsAndroidId = document.querySelector('#settings-android-id');
+const settingsSecurityToken = document.querySelector('#settings-security-token');
+const settingsFcmToken = document.querySelector('#settings-fcm-token');
+const settingsExpoPushToken = document.querySelector('#settings-expo-push-token');
+const settingsRustplusAuthToken = document.querySelector('#settings-rustplus-auth-token');
+const showSettingsSecrets = document.querySelector('#show-settings-secrets');
 const createGroupButton = document.querySelector('#create-group');
 const pairingSection = document.querySelector('#pairing');
 const pairingStatus = document.querySelector('#pairing-status');
@@ -50,6 +66,7 @@ function render(state) {
   serverSelect.value = state.config.activeServerId || '';
   serverSelect.disabled = !state.config.servers.length;
   configureDiscordButton.disabled = !state.config.activeServerId;
+  editSettingsButton.disabled = !state.config.activeServerId;
   discordState.textContent = state.config.discordConfigured ? 'Discord alarm notifications are enabled.' : 'Discord alarm notifications are not configured.';
   renderControls(state);
 }
@@ -214,6 +231,32 @@ function openDiscordSettings() {
   discordWebhookUrl.focus();
 }
 
+async function openSettings() {
+  const result = await apiFetch('/api/settings');
+  if (!result.ok) { feedback.textContent = (await result.json()).error || 'Unable to load settings.'; return; }
+  const settings = await result.json();
+  settingsServerName.value = settings.server.name;
+  settingsServerHost.value = settings.server.host;
+  settingsServerPort.value = settings.server.port;
+  settingsPlayerId.value = settings.server.playerId;
+  settingsPlayerToken.value = settings.server.playerToken;
+  settingsUseProxy.checked = settings.server.useProxy;
+  settingsAndroidId.value = settings.fcm.androidId;
+  settingsSecurityToken.value = settings.fcm.securityToken;
+  settingsFcmToken.value = settings.fcm.token;
+  settingsExpoPushToken.value = settings.fcm.expoPushToken;
+  settingsRustplusAuthToken.value = settings.fcm.rustplusAuthToken;
+  showSettingsSecrets.checked = false;
+  setSettingsSecretVisibility();
+  settingsDialog.showModal();
+  settingsServerName.focus();
+}
+
+function setSettingsSecretVisibility() {
+  const type = showSettingsSecrets.checked ? 'text' : 'password';
+  for (const input of [settingsPlayerToken, settingsAndroidId, settingsSecurityToken, settingsFcmToken, settingsExpoPushToken, settingsRustplusAuthToken]) input.type = type;
+}
+
 async function toggleGroup(groupId, enabled, control) {
   control.disabled = true;
   const result = await apiFetch(`/api/groups/${encodeURIComponent(groupId)}/switch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) });
@@ -284,6 +327,9 @@ serverSelect.addEventListener('change', async () => {
 notificationButton.addEventListener('click', async () => { if ('Notification' in window) await Notification.requestPermission(); updateNotificationState(); });
 configureDiscordButton.addEventListener('click', openDiscordSettings);
 document.querySelector('#cancel-discord').addEventListener('click', () => discordDialog.close());
+editSettingsButton.addEventListener('click', openSettings);
+document.querySelector('#cancel-settings').addEventListener('click', () => settingsDialog.close());
+showSettingsSecrets.addEventListener('change', setSettingsSecretVisibility);
 document.querySelector('#reject-pairing').addEventListener('click', async () => {
   if (activePairing) await apiFetch(`/api/pairings/${encodeURIComponent(activePairing.id)}`, { method: 'DELETE' });
   pairingDialog.close(); activePairing = null; refreshPendingPairings();
@@ -317,6 +363,23 @@ discordForm.addEventListener('submit', async (event) => {
   if (!result.ok) { feedback.textContent = (await result.json()).error || 'Unable to save Discord webhook.'; return; }
   discordDialog.close();
   await refresh();
+});
+settingsForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  saveSettings.disabled = true;
+  const result = await apiFetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      server: { name: settingsServerName.value.trim(), host: settingsServerHost.value.trim(), port: settingsServerPort.value.trim(), playerId: settingsPlayerId.value.trim(), playerToken: settingsPlayerToken.value.trim(), useProxy: settingsUseProxy.checked },
+      fcm: { androidId: settingsAndroidId.value.trim(), securityToken: settingsSecurityToken.value.trim(), token: settingsFcmToken.value.trim(), expoPushToken: settingsExpoPushToken.value.trim(), rustplusAuthToken: settingsRustplusAuthToken.value.trim() },
+    }),
+  });
+  saveSettings.disabled = false;
+  if (!result.ok) { feedback.textContent = (await result.json()).error || 'Unable to save settings.'; return; }
+  settingsDialog.close();
+  await refresh();
+  await refreshPairingStatus();
 });
 groupForm.addEventListener('submit', async (event) => {
   event.preventDefault();
