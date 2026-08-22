@@ -5,9 +5,13 @@
   "main": "server.js",
   "scripts": {
     "postinstall": "node scripts/patch-rustplus-proto.js",
-    "start": "node server.js",
-    "start:test": "node scripts/start-with-test-key.js",
-    "test": "node --test"
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.js\" \"*.{js,json,cjs}\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.js\" \"*.{js,json,cjs}\"",
+    "start": "npm run build && node server.js",
+    "start:test": "npm run build && node scripts/start-with-test-key.js",
+    "test": "npm run format:check && npm run build && node --test"
   },
   "keywords": [],
   "author": "",
@@ -16,5 +20,10 @@
   "dependencies": {
     "@liamcottle/rustplus.js": "^2.5.0",
     "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "prettier": "^3.9.6",
+    "typescript": "^7.0.2"
   }
 }
