@@ -585,6 +585,11 @@ export class RustplusControlService {
       { cwd: this.rootDirectory },
     );
     this.fcmListenerProcess = listener;
+    listener.on('error', (error) => {
+      logRust(`FCM listener failed to start: ${errorSummary(error)}`);
+      if (this.fcmListenerProcess === listener) this.fcmListenerProcess = null;
+      this.fcmStatus = { registered: true, listening: false, message: 'Listener failed to start' };
+    });
     this.fcmStatus = {
       registered: true,
       listening: true,
@@ -644,6 +649,15 @@ export class RustplusControlService {
       [this.fcmCliPath, `--config-file=${this.repository.fcmConfigPath}`, 'fcm-register'],
       { cwd: this.rootDirectory },
     );
+    this.fcmRegisterProcess.on('error', (error) => {
+      logRust(`FCM registration failed to start: ${errorSummary(error)}`);
+      this.fcmRegisterProcess = null;
+      this.fcmStatus = {
+        registered: false,
+        listening: false,
+        message: 'Registration failed to start',
+      };
+    });
     this.fcmStatus = {
       registered: false,
       listening: false,

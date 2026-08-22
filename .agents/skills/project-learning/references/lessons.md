@@ -2,6 +2,16 @@
 
 Use this file for confirmed, project-specific lessons. Add entries in reverse chronological order.
 
+## 2026-08-22 - Patch optional storage item fields
+
+**Context:** Loading Storage Monitor contents from a current Rust+ server.
+
+**What went wrong:** `AppEntityPayload.Item.itemIsBlueprint` remained required, while the server omitted it for some inventory items, causing protobuf decoding to terminate the connection.
+
+**Required behavior:** Make this field optional through the post-install patch, anchored to `AppEntityPayload.Item`, and verify that exact field after patching.
+
+**Evidence:** User supplied `ProtocolError: missing required 'itemIsBlueprint'` for an item with only `itemId` and `quantity`.
+
 ## 2026-08-22 - Restart the FCM listener sequentially
 
 **Context:** Saving edited FCM settings in the dashboard.

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
-import express from 'express';
+import express, { type ErrorRequestHandler } from 'express';
 import { ConfigRepository } from './repositories/config-repository';
 import { createApiRouter } from './routes/api-router';
 import { RustItemCatalog } from './services/rust-item-catalog';
@@ -13,6 +13,19 @@ const authToken = process.env.APP_AUTH_TOKEN;
 
 if (!authToken) throw new Error('APP_AUTH_TOKEN must be set before starting Rust+ Control.');
 
+function errorSummary(error: unknown): string {
+  const value = error as { name?: unknown; message?: unknown } | null;
+  const name = String(value?.name || 'Error');
+  const message = String(value?.message || '')
+    .replace(/[\r\n]+/g, ' ')
+    .slice(0, 240);
+  return message ? `${name}: ${message}` : name;
+}
+
+function logUnhandledError(source: string, error: unknown): void {
+  console.error(`[rustplus] ${source}: ${errorSummary(error)}`);
+}
+
 const app = express();
 const itemCatalog = new RustItemCatalog();
 const control = new RustplusControlService(
@@ -22,11 +35,11 @@ const control = new RustplusControlService(
   itemCatalog,
 );
 
-process.on('uncaughtExceptionMonitor', (error, origin) => {
-  const message = String(error.message || '')
-    .replace(/[\r\n]+/g, ' ')
-    .slice(0, 240);
-  console.log(`[rustplus] fatal ${origin}: ${error.name}${message ? `: ${message}` : ''}`);
+process.on('uncaughtException', (error, origin) => {
+  logUnhandledError(`uncaught exception (${origin})`, error);
+});
+process.on('unhandledRejection', (reason) => {
+  logUnhandledError('unhandled rejection', reason);
 });
 
 app.use(express.json());
@@ -42,6 +55,15 @@ app.use('/api', (request, response, next) => {
   return next();
 });
 app.use('/api', createApiRouter(control));
+const apiErrorHandler: ErrorRequestHandler = (error, request, response, next) => {
+  logUnhandledError(`${request.method} ${request.originalUrl}`, error);
+  if (response.headersSent) return next(error);
+  const status = error instanceof SyntaxError && 'body' in error ? 400 : 500;
+  return response
+    .status(status)
+    .json({ error: status === 400 ? 'Invalid JSON body.' : 'Request failed.' });
+};
+app.use('/api', apiErrorHandler);
 
 app.listen(port, host, () => {
   console.log(`Rust+ Control is running at http://${host}:${port}`);

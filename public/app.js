@@ -125,10 +125,13 @@ function renderDeviceRow(device, state, position, count, child = false) {
   const deviceIcon = device.iconUrl
     ? `<img class="device-icon" src="${escapeHtml(device.iconUrl)}" alt="">`
     : '';
-  const storageItems = isStorage && storage ? `<ul class="storage-items">${storage.items.map((item) => `<li>${item.item?.iconUrl ? `<img src="${escapeHtml(item.item.iconUrl)}" alt="">` : ''}<span>${escapeHtml(item.item?.displayName || `Item ${item.itemId}`)}${item.itemIsBlueprint ? ' blueprint' : ''}</span><strong>${item.quantity}</strong></li>`).join('')}</ul>` : '';
+  const storageItems = isStorage && storage ? `<ul class="storage-items">${storage.items.map((item) => { const itemName = `${item.item?.displayName || `Item ${item.itemId}`}${item.itemIsBlueprint ? ' blueprint' : ''}`; return `<li title="${escapeHtml(itemName)}">${item.item?.iconUrl ? `<img src="${escapeHtml(item.item.iconUrl)}" alt="${escapeHtml(itemName)}">` : ''}<strong>${item.quantity}</strong></li>`; }).join('')}</ul>` : '';
+  const actions = `<div class="control-actions"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(device.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(device.name)} down">&darr;</button><button type="button" class="secondary rename-device" aria-label="Rename ${escapeHtml(device.name)}">Rename</button>${isSwitch ? toggleMarkup(device.name, enabled === true, 'device-switch') : ''}</div>`;
   const row = document.createElement('article');
-  row.className = `control-row ${child ? 'group-child' : ''}`;
-  row.innerHTML = `<div class="control-info"><h3>${deviceIcon}${escapeHtml(device.name)}</h3><p>${stateLabel}</p>${storageItems}</div><div class="control-actions"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(device.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(device.name)} down">&darr;</button><button type="button" class="secondary rename-device" aria-label="Rename ${escapeHtml(device.name)}">Rename</button>${isAlarm ? '<span class="alarm-status">ALARM</span>' : isSwitch ? toggleMarkup(device.name, enabled === true, 'device-switch') : '<span class="storage-status">STORAGE</span>'}</div>`;
+  row.className = `control-row ${isStorage ? 'storage-row' : ''} ${child ? 'group-child' : ''}`;
+  row.innerHTML = isStorage
+    ? `<div class="storage-header"><div class="control-info"><h3>${deviceIcon}${escapeHtml(device.name)}</h3><p>${stateLabel}</p></div>${actions}</div>${storageItems}`
+    : `<div class="control-info"><h3>${deviceIcon}${escapeHtml(device.name)}</h3><p>${stateLabel}</p></div>${actions}`;
   addOrderControls(row, 'device', device.entityId, position, count);
   row.querySelector('.rename-device').addEventListener('click', () => openDeviceEditor(device));
   if (isSwitch) row.querySelector('.device-switch').addEventListener('click', (event) => toggle(device.entityId, enabled !== true, event.currentTarget));
