@@ -4,6 +4,12 @@ const feedback = document.querySelector('#feedback');
 const eventList = document.querySelector('#event-list');
 const notificationButton = document.querySelector('#enable-notifications');
 const notificationState = document.querySelector('#notification-state');
+const configureDiscordButton = document.querySelector('#configure-discord');
+const discordState = document.querySelector('#discord-state');
+const discordDialog = document.querySelector('#discord-dialog');
+const discordForm = document.querySelector('#discord-form');
+const discordWebhookUrl = document.querySelector('#discord-webhook-url');
+const saveDiscord = document.querySelector('#save-discord');
 const createGroupButton = document.querySelector('#create-group');
 const pairingSection = document.querySelector('#pairing');
 const pairingStatus = document.querySelector('#pairing-status');
@@ -43,6 +49,8 @@ function render(state) {
   for (const server of state.config.servers) serverSelect.add(new Option(server.name, server.id));
   serverSelect.value = state.config.activeServerId || '';
   serverSelect.disabled = !state.config.servers.length;
+  configureDiscordButton.disabled = !state.config.activeServerId;
+  discordState.textContent = state.config.discordConfigured ? 'Discord alarm notifications are enabled.' : 'Discord alarm notifications are not configured.';
   renderControls(state);
 }
 
@@ -199,6 +207,13 @@ function openGroupEditor(group = null) {
   groupName.focus();
 }
 
+function openDiscordSettings() {
+  if (!currentState?.config.activeServerId) return;
+  discordWebhookUrl.value = '';
+  discordDialog.showModal();
+  discordWebhookUrl.focus();
+}
+
 async function toggleGroup(groupId, enabled, control) {
   control.disabled = true;
   const result = await apiFetch(`/api/groups/${encodeURIComponent(groupId)}/switch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) });
@@ -267,6 +282,8 @@ serverSelect.addEventListener('change', async () => {
   await refresh();
 });
 notificationButton.addEventListener('click', async () => { if ('Notification' in window) await Notification.requestPermission(); updateNotificationState(); });
+configureDiscordButton.addEventListener('click', openDiscordSettings);
+document.querySelector('#cancel-discord').addEventListener('click', () => discordDialog.close());
 document.querySelector('#reject-pairing').addEventListener('click', async () => {
   if (activePairing) await apiFetch(`/api/pairings/${encodeURIComponent(activePairing.id)}`, { method: 'DELETE' });
   pairingDialog.close(); activePairing = null; refreshPendingPairings();
@@ -290,6 +307,15 @@ deviceForm.addEventListener('submit', async (event) => {
   if (!result.ok) { feedback.textContent = (await result.json()).error || 'Unable to rename device.'; return; }
   deviceDialog.close();
   activeDevice = null;
+  await refresh();
+});
+discordForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  saveDiscord.disabled = true;
+  const result = await apiFetch('/api/discord-webhook', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: discordWebhookUrl.value.trim() }) });
+  saveDiscord.disabled = false;
+  if (!result.ok) { feedback.textContent = (await result.json()).error || 'Unable to save Discord webhook.'; return; }
+  discordDialog.close();
   await refresh();
 });
 groupForm.addEventListener('submit', async (event) => {

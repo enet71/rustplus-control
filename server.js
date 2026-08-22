@@ -106,9 +106,46 @@ function publicConfig() {
     server: { ...server, hasPlayerToken: Boolean(playerToken) },
     devices: profile?.devices || [],
     groups: profile?.groups || [],
+    discordConfigured: Boolean(profile?.discordWebhookUrl),
     activeServerId: config.activeServerId,
     servers: config.servers.map((item) => ({ id: item.id, name: item.name, host: item.server.host, connected: item.id === config.activeServerId && status.connected })),
   };
+}
+
+function discordWebhookUrl(value) {
+  const url = String(value || '').trim();
+  if (!url) return { url: '' };
+  try {
+    const parsed = new URL(url);
+    const validHost = ['discord.com', 'discordapp.com', 'ptb.discord.com', 'canary.discord.com'].includes(parsed.hostname);
+    if (parsed.protocol !== 'https:' || !validHost || !/^\/api\/webhooks\/[^/]+\/[^/]+/.test(parsed.pathname)) throw new Error('invalid');
+    return { url: parsed.toString() };
+  } catch {
+    return { error: 'Enter a valid Discord webhook URL.' };
+  }
+}
+
+async function sendDiscordAlarm(profile, device) {
+  const webhookUrl = profile?.discordWebhookUrl;
+  if (!webhookUrl) return;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: `@everyone Alarm triggered: ${device.name}${profile.name ? ` (${profile.name})` : ''}`,
+        allowed_mentions: { parse: ['everyone'] },
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) logRust(`Discord alarm notification failed (${response.status})`);
+  } catch (error) {
+    logRust(`Discord alarm notification failed: ${error?.name || 'Error'}`);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function groupInput(body, profile, currentGroupId = null) {
@@ -412,9 +449,11 @@ function connect() {
       const entityId = String(changed.entityId);
       const wasActive = deviceStates[entityId];
       publishEntityState(entityId, changed.payload.value);
-      const device = (activeProfile()?.devices || []).find((item) => item.entityId === entityId);
+      const profile = activeProfile();
+      const device = (profile?.devices || []).find((item) => item.entityId === entityId);
       if (device?.type === 'alarm' && changed.payload.value && !wasActive) {
         publishEvent({ id: `${entityId}:${Date.now()}`, title: 'Smart Alarm', body: `${device.name} was triggered`, type: 'alarm', createdAt: new Date().toISOString() });
+        void sendDiscordAlarm(profile, device);
       }
     }
   });
@@ -476,6 +515,15 @@ app.get('/api/events', (request, response) => {
   response.write(': connected\n\n');
   eventClients.add(response);
   request.on('close', () => eventClients.delete(response));
+});
+
+app.put('/api/discord-webhook', (request, response) => {
+  const profile = activeProfile();
+  if (!profile) return response.status(404).json({ error: 'No active server.' });
+  const input = discordWebhookUrl(request.body?.url);
+  if (input.error) return response.status(400).json({ error: input.error });
+  setActiveProfile({ ...profile, discordWebhookUrl: input.url });
+  return response.json({ configured: Boolean(input.url) });
 });
 
 app.put('/api/config', (request, response) => {
