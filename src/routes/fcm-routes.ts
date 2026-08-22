@@ -25,7 +25,11 @@ export function createFcmRouter(control: RustplusControlService): Router {
     if (!pending) return response.status(404).json({ error: 'Pairing request expired.' });
     const name = String(request.body?.name || pending.name).trim();
     if (!name) return response.status(400).json({ error: 'Device name is required.' });
-    control.acceptPairing(pending.id, name, request.body?.type === 'alarm' ? 'alarm' : 'switch');
+    const type =
+      request.body?.type === 'alarm' || request.body?.type === 'storage'
+        ? request.body.type
+        : 'switch';
+    control.acceptPairing(pending.id, name, type);
     return response.json({ ok: true });
   });
   router.delete('/pairings/:id', (request, response) => {

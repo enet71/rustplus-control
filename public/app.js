@@ -117,14 +117,21 @@ function addOrderControls(row, type, id, position, count) {
 
 function renderDeviceRow(device, state, position, count, child = false) {
   const enabled = state.deviceStates[device.entityId];
+  const storage = state.storageStates?.[device.entityId];
   const isAlarm = device.type === 'alarm';
-  const stateLabel = enabled === undefined ? 'State unknown' : enabled ? isAlarm ? 'Alarm active' : 'Powered on' : isAlarm ? 'Monitoring' : 'Powered off';
+  const isStorage = device.type === 'storage';
+  const isSwitch = device.type === 'switch';
+  const stateLabel = isStorage ? storage ? `${storage.items.length} / ${storage.capacity || '?'} slots used` : 'Storage state unknown' : enabled === undefined ? 'State unknown' : enabled ? isAlarm ? 'Alarm active' : 'Powered on' : isAlarm ? 'Monitoring' : 'Powered off';
+  const deviceIcon = device.iconUrl
+    ? `<img class="device-icon" src="${escapeHtml(device.iconUrl)}" alt="">`
+    : '';
+  const storageItems = isStorage && storage ? `<ul class="storage-items">${storage.items.map((item) => `<li>${item.item?.iconUrl ? `<img src="${escapeHtml(item.item.iconUrl)}" alt="">` : ''}<span>${escapeHtml(item.item?.displayName || `Item ${item.itemId}`)}${item.itemIsBlueprint ? ' blueprint' : ''}</span><strong>${item.quantity}</strong></li>`).join('')}</ul>` : '';
   const row = document.createElement('article');
   row.className = `control-row ${child ? 'group-child' : ''}`;
-  row.innerHTML = `<div class="control-info"><h3>${escapeHtml(device.name)}</h3><p>${stateLabel}</p></div><div class="control-actions"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(device.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(device.name)} down">&darr;</button><button type="button" class="secondary rename-device" aria-label="Rename ${escapeHtml(device.name)}">Rename</button>${isAlarm ? '<span class="alarm-status">ALARM</span>' : toggleMarkup(device.name, enabled === true, 'device-switch')}</div>`;
+  row.innerHTML = `<div class="control-info"><h3>${deviceIcon}${escapeHtml(device.name)}</h3><p>${stateLabel}</p>${storageItems}</div><div class="control-actions"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(device.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(device.name)} down">&darr;</button><button type="button" class="secondary rename-device" aria-label="Rename ${escapeHtml(device.name)}">Rename</button>${isAlarm ? '<span class="alarm-status">ALARM</span>' : isSwitch ? toggleMarkup(device.name, enabled === true, 'device-switch') : '<span class="storage-status">STORAGE</span>'}</div>`;
   addOrderControls(row, 'device', device.entityId, position, count);
   row.querySelector('.rename-device').addEventListener('click', () => openDeviceEditor(device));
-  if (!isAlarm) row.querySelector('.device-switch').addEventListener('click', (event) => toggle(device.entityId, enabled !== true, event.currentTarget));
+  if (isSwitch) row.querySelector('.device-switch').addEventListener('click', (event) => toggle(device.entityId, enabled !== true, event.currentTarget));
   return row;
 }
 
@@ -142,7 +149,7 @@ function renderControls(state) {
     }
     const group = item;
     const groupDevices = group.deviceIds.map((entityId) => state.config.devices.find((device) => device.entityId === entityId)).filter(Boolean);
-    const groupSwitches = groupDevices.filter((device) => device.type !== 'alarm');
+    const groupSwitches = groupDevices.filter((device) => device.type === 'switch');
     const allEnabled = groupSwitches.every((device) => state.deviceStates[device.entityId] === true);
     const collapsed = isGroupCollapsed(state.config.activeServerId || '', group.id);
     const groupRow = document.createElement('article');

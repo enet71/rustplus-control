@@ -1,4 +1,4 @@
-export type DeviceType = 'switch' | 'alarm';
+export type DeviceType = 'switch' | 'alarm' | 'storage';
 
 export interface RustServerSettings {
   host: string;
@@ -54,6 +54,25 @@ export interface FcmConfig {
 export interface ConnectionStatus {
   connected: boolean;
   message: string;
+}
+
+export interface StorageState {
+  capacity: number;
+  items: Array<StorageItem>;
+}
+
+export interface StorageItem {
+  itemId: number;
+  quantity: number;
+  itemIsBlueprint: boolean;
+  item?: RustItem;
+}
+
+export interface RustItem {
+  id: number;
+  shortName: string;
+  displayName: string;
+  iconUrl: string;
 }
 
 export interface FcmStatus {

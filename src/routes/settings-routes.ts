@@ -71,7 +71,7 @@ export function createSettingsRouter(control: RustplusControlService): Router {
       return {
         name: String(item.name),
         entityId: String(item.entityId),
-        type: item.type === 'alarm' ? 'alarm' : 'switch',
+        type: item.type === 'alarm' || item.type === 'storage' ? item.type : 'switch',
         sortOrder: Number.isFinite(Number(existing?.sortOrder))
           ? Number(existing?.sortOrder)
           : index,

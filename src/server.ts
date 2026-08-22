@@ -3,6 +3,7 @@ import path from 'node:path';
 import express from 'express';
 import { ConfigRepository } from './repositories/config-repository';
 import { createApiRouter } from './routes/api-router';
+import { RustItemCatalog } from './services/rust-item-catalog';
 import { RustplusControlService } from './services/rustplus-control-service';
 
 const rootDirectory = path.resolve(__dirname, '..');
@@ -13,10 +14,12 @@ const authToken = process.env.APP_AUTH_TOKEN;
 if (!authToken) throw new Error('APP_AUTH_TOKEN must be set before starting Rust+ Control.');
 
 const app = express();
+const itemCatalog = new RustItemCatalog();
 const control = new RustplusControlService(
   new ConfigRepository(rootDirectory),
   rootDirectory,
   process.env.NODE_ENV !== 'production',
+  itemCatalog,
 );
 
 process.on('uncaughtExceptionMonitor', (error, origin) => {
@@ -42,5 +45,6 @@ app.use('/api', createApiRouter(control));
 
 app.listen(port, host, () => {
   console.log(`Rust+ Control is running at http://${host}:${port}`);
+  itemCatalog.start();
   control.start();
 });

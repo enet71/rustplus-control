@@ -16,9 +16,10 @@ function createControl() {
             devices: [
               { entityId: 'switch', name: 'Door', type: 'switch' },
               { entityId: 'alarm', name: 'Alarm', type: 'alarm' },
+              { entityId: 'storage', name: 'Storage', type: 'storage' },
             ],
             groups: [
-              { id: 'mixed', name: 'Mixed', deviceIds: ['switch', 'alarm'] },
+              { id: 'mixed', name: 'Mixed', deviceIds: ['switch', 'alarm', 'storage'] },
               { id: 'alarms', name: 'Alarms', deviceIds: ['alarm'] },
             ],
           },

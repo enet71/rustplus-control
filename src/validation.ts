@@ -135,7 +135,7 @@ export function deviceBackupInput(body: unknown): Result<DeviceBackup> {
     const entityId = String(item?.entityId || '');
     if (!name || name.length > 80 || !/^-?\d+$/.test(entityId))
       return { error: 'Each backup device needs a name and numeric entity ID.' };
-    if (item?.type !== 'switch' && item?.type !== 'alarm')
+    if (item?.type !== 'switch' && item?.type !== 'alarm' && item?.type !== 'storage')
       return { error: 'Each backup device needs a valid type.' };
     if (deviceIds.has(entityId)) return { error: 'Backup device IDs must be unique.' };
     const sortOrder = Number(item?.sortOrder);

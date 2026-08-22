@@ -93,6 +93,7 @@ test('deviceBackupInput accepts groups and rejects repeated membership', () => {
     devices: [
       { entityId: '1', name: 'Door', type: 'switch' },
       { entityId: '2', name: 'Alarm', type: 'alarm' },
+      { entityId: '3', name: 'Storage', type: 'storage' },
     ],
     groups: [{ id: 'mixed', name: 'Base', deviceIds: ['1', '2'] }],
   };
@@ -102,6 +103,7 @@ test('deviceBackupInput accepts groups and rejects repeated membership', () => {
     devices: [
       { entityId: '1', name: 'Door', type: 'switch', sortOrder: 0 },
       { entityId: '2', name: 'Alarm', type: 'alarm', sortOrder: 1 },
+      { entityId: '3', name: 'Storage', type: 'storage', sortOrder: 2 },
     ],
     groups: [{ id: 'mixed', name: 'Base', deviceIds: ['1', '2'], sortOrder: 0 }],
   });

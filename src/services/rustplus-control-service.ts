@@ -12,8 +12,11 @@ import type {
   FcmStatus,
   PendingPairing,
   RustEvent,
+  RustItem,
   ServerProfile,
+  StorageState,
 } from '../types';
+import { RustItemCatalog } from './rust-item-catalog';
 
 const RustPlus: any = require('@liamcottle/rustplus.js');
 const RECONNECT_DELAY_MS = 5000;
@@ -39,6 +42,7 @@ export class RustplusControlService {
   private status: ConnectionStatus = { connected: false, message: 'Not configured' };
   private config: AppConfig;
   private deviceStates: Record<string, boolean> = {};
+  private storageStates: Record<string, StorageState> = {};
   private markerSnapshots = new Map<string, string>();
   private teamDeaths = new Map<string, number>();
   private readonly eventClients = new Set<Response>();
@@ -55,6 +59,10 @@ export class RustplusControlService {
     private readonly repository: ConfigRepository,
     private readonly rootDirectory: string,
     private readonly registrationAvailable: boolean,
+    private readonly itemCatalog: Pick<RustItemCatalog, 'get' | 'getDeviceIcon'> = {
+      get: () => null,
+      getDeviceIcon: () => null,
+    },
   ) {
     this.repository.migrateLegacyFcmConfig();
     this.config = this.repository.loadConfig();
@@ -84,7 +92,12 @@ export class RustplusControlService {
   }
 
   getState(): Record<string, unknown> {
-    return { ...this.status, config: this.publicConfig(), deviceStates: this.deviceStates };
+    return {
+      ...this.status,
+      config: this.publicConfig(),
+      deviceStates: this.deviceStates,
+      storageStates: this.publicStorageStates(),
+    };
   }
 
   getFcmStatus(): FcmStatus & { registrationAvailable: boolean } {
@@ -118,6 +131,7 @@ export class RustplusControlService {
     this.setActiveProfile(profile);
     this.restartFcmListener();
     this.deviceStates = {};
+    this.storageStates = {};
     this.connect();
   }
 
@@ -143,6 +157,7 @@ export class RustplusControlService {
     if (this.client) this.client.disconnect();
     this.client = null;
     this.deviceStates = {};
+    this.storageStates = {};
     this.status = { connected: false, message: 'Log in to connect Rust+' };
     this.fcmStatus = { registered: false, listening: false, message: 'Not registered' };
   }
@@ -170,6 +185,7 @@ export class RustplusControlService {
     if (!profile) return false;
     this.saveConfig({ ...this.config, activeServerId: profile.id });
     this.deviceStates = {};
+    this.storageStates = {};
     if (this.fcmStatus.registered) this.connect();
     else this.status = { connected: false, message: 'Log in to connect Rust+' };
     return true;
@@ -213,6 +229,7 @@ export class RustplusControlService {
       groups: this.reconcileGroups(profile.groups, input.devices),
     });
     this.deviceStates = {};
+    this.storageStates = {};
     this.connect();
   }
 
@@ -220,7 +237,7 @@ export class RustplusControlService {
     if (!this.client || !this.status.connected) return 'not-connected';
     if (
       !(this.activeProfile()?.devices || []).some(
-        (device) => device.entityId === entityId && device.type !== 'alarm',
+        (device) => device.entityId === entityId && device.type === 'switch',
       )
     )
       return 'unknown';
@@ -257,6 +274,7 @@ export class RustplusControlService {
     if (!profile) return false;
     this.setActiveProfile({ ...profile, devices: backup.devices, groups: backup.groups });
     this.deviceStates = {};
+    this.storageStates = {};
     this.connect();
     return true;
   }
@@ -302,7 +320,7 @@ export class RustplusControlService {
     const group = profile?.groups.find((item) => item.id === id);
     if (!group) return 'unknown';
     const switchIds = group.deviceIds.filter((entityId) =>
-      profile?.devices.some((device) => device.entityId === entityId && device.type !== 'alarm'),
+      profile?.devices.some((device) => device.entityId === entityId && device.type === 'switch'),
     );
     if (!switchIds.length) return 'no-switches';
     for (const entityId of switchIds)
@@ -345,7 +363,10 @@ export class RustplusControlService {
       profile?.server || ({} as ServerProfile['server']);
     return {
       server: { ...server, hasPlayerToken: Boolean(profile?.server.playerToken) },
-      devices: profile?.devices || [],
+      devices: (profile?.devices || []).map((device) => ({
+        ...device,
+        iconUrl: this.itemCatalog.getDeviceIcon(device.type)?.iconUrl,
+      })),
       groups: profile?.groups || [],
       discordConfigured: Boolean(profile?.discordWebhookUrl),
       activeServerId: this.config.activeServerId,
@@ -356,6 +377,20 @@ export class RustplusControlService {
         connected: item.id === this.config.activeServerId && this.status.connected,
       })),
     };
+  }
+  private publicStorageStates(): Record<string, StorageState> {
+    return Object.fromEntries(
+      Object.entries(this.storageStates).map(([entityId, storage]) => [
+        entityId,
+        {
+          ...storage,
+          items: storage.items.map((item) => ({
+            ...item,
+            item: this.itemCatalog.get(item.itemId) || undefined,
+          })),
+        },
+      ]),
+    );
   }
   private reconcileGroups(groups: DeviceGroup[], devices: Device[]): DeviceGroup[] {
     const deviceIds = new Set(devices.map((device) => device.entityId));
@@ -435,6 +470,19 @@ export class RustplusControlService {
   private publishEntityState(entityId: string, value: boolean): void {
     this.deviceStates[String(entityId)] = Boolean(value);
   }
+  private publishStorageState(
+    entityId: string,
+    payload: { capacity?: unknown; items?: unknown },
+  ): void {
+    const items = Array.isArray(payload.items)
+      ? payload.items.map((item: any) => ({
+          itemId: Number(item.itemId),
+          quantity: Number(item.quantity),
+          itemIsBlueprint: Boolean(item.itemIsBlueprint),
+        }))
+      : [];
+    this.storageStates[String(entityId)] = { capacity: Number(payload.capacity || 0), items };
+  }
   private publishEvent(event: RustEvent): void {
     const payload = `event: rust-event\ndata: ${JSON.stringify(event)}\n\n`;
     for (const response of this.eventClients) response.write(payload);
@@ -511,7 +559,12 @@ export class RustplusControlService {
         serverId,
         entityId,
         name: pairing.entityName || 'Smart device',
-        type: String(pairing.entityType) === '2' ? 'alarm' : 'switch',
+        type:
+          String(pairing.entityType) === '2'
+            ? 'alarm'
+            : String(pairing.entityType) === '3'
+              ? 'storage'
+              : 'switch',
       };
       this.pendingPairings.set(pending.id, pending);
       this.publishEvent({
@@ -724,8 +777,10 @@ export class RustplusControlService {
             logRust(
               `device state response error ${requestNumber}/${total}: ${errorSummary({ name: 'Rust+ response', message: message.response.error.error })}`,
             );
-          const value = message.response?.entityInfo?.payload?.value;
-          if (typeof value === 'boolean') this.publishEntityState(device.entityId, value);
+          const payload = message.response?.entityInfo?.payload;
+          if (device.type === 'storage') this.publishStorageState(device.entityId, payload || {});
+          else if (typeof payload?.value === 'boolean')
+            this.publishEntityState(device.entityId, payload.value);
           return true;
         });
       } catch (error) {
@@ -807,11 +862,13 @@ export class RustplusControlService {
     rustplus.on('message', (message: any) => {
       if (this.client !== rustplus) return;
       const changed = message.broadcast?.entityChanged;
-      if (changed && typeof changed.payload.value === 'boolean') {
+      if (changed && (typeof changed.payload.value === 'boolean' || changed.payload.items)) {
         const entityId = String(changed.entityId);
         const wasActive = this.deviceStates[entityId];
-        this.publishEntityState(entityId, changed.payload.value);
+        if (typeof changed.payload.value === 'boolean')
+          this.publishEntityState(entityId, changed.payload.value);
         const device = this.activeProfile()?.devices.find((item) => item.entityId === entityId);
+        if (device?.type === 'storage') this.publishStorageState(entityId, changed.payload);
         if (device?.type === 'alarm' && changed.payload.value && !wasActive) {
           this.publishEvent({
             id: `${entityId}:${Date.now()}`,
