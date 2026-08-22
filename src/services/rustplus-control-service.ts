@@ -7,6 +7,7 @@ import type {
   AppConfig,
   ConnectionStatus,
   Device,
+  DeviceBackup,
   DeviceGroup,
   FcmStatus,
   PendingPairing,
@@ -241,6 +242,25 @@ export class RustplusControlService {
     return true;
   }
 
+  exportDeviceBackup(): DeviceBackup | null {
+    const profile = this.activeProfile();
+    if (!profile) return null;
+    return {
+      version: 1,
+      devices: profile.devices.map((device) => ({ ...device })),
+      groups: profile.groups.map((group) => ({ ...group, deviceIds: [...group.deviceIds] })),
+    };
+  }
+
+  importDeviceBackup(backup: DeviceBackup): boolean {
+    const profile = this.activeProfile();
+    if (!profile) return false;
+    this.setActiveProfile({ ...profile, devices: backup.devices, groups: backup.groups });
+    this.deviceStates = {};
+    this.connect();
+    return true;
+  }
+
   createGroup(name: string, deviceIds: string[]): DeviceGroup | null {
     const profile = this.activeProfile();
     if (!profile) return null;
@@ -276,11 +296,16 @@ export class RustplusControlService {
     return true;
   }
 
-  setGroupValue(id: string, enabled: boolean): 'not-connected' | 'unknown' | null {
+  setGroupValue(id: string, enabled: boolean): 'not-connected' | 'unknown' | 'no-switches' | null {
     if (!this.client || !this.status.connected) return 'not-connected';
-    const group = this.activeProfile()?.groups.find((item) => item.id === id);
+    const profile = this.activeProfile();
+    const group = profile?.groups.find((item) => item.id === id);
     if (!group) return 'unknown';
-    for (const entityId of group.deviceIds)
+    const switchIds = group.deviceIds.filter((entityId) =>
+      profile?.devices.some((device) => device.entityId === entityId && device.type !== 'alarm'),
+    );
+    if (!switchIds.length) return 'no-switches';
+    for (const entityId of switchIds)
       this.client.setEntityValue(entityId, enabled, (message: any) => {
         if (!message.response?.error) this.publishEntityState(entityId, enabled);
       });
@@ -333,13 +358,11 @@ export class RustplusControlService {
     };
   }
   private reconcileGroups(groups: DeviceGroup[], devices: Device[]): DeviceGroup[] {
-    const switchIds = new Set(
-      devices.filter((device) => device.type !== 'alarm').map((device) => device.entityId),
-    );
+    const deviceIds = new Set(devices.map((device) => device.entityId));
     return groups
       .map((group) => ({
         ...group,
-        deviceIds: [...new Set(group.deviceIds.filter((id) => switchIds.has(id)))],
+        deviceIds: [...new Set(group.deviceIds.filter((id) => deviceIds.has(id)))],
       }))
       .filter((group) => group.deviceIds.length > 0);
   }

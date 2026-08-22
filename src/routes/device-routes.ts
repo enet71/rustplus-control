@@ -1,9 +1,22 @@
 import { Router } from 'express';
-import { groupInput, isValidationError } from '../validation';
+import { deviceBackupInput, groupInput, isValidationError } from '../validation';
 import { RustplusControlService } from '../services/rustplus-control-service';
 
 export function createDeviceRouter(control: RustplusControlService): Router {
   const router = Router();
+
+  router.get('/device-backup', (_request, response) => {
+    const backup = control.exportDeviceBackup();
+    if (!backup) return response.status(404).json({ error: 'No active server.' });
+    return response.json(backup);
+  });
+  router.post('/device-backup', (request, response) => {
+    const backup = deviceBackupInput(request.body);
+    if (isValidationError(backup)) return response.status(400).json({ error: backup.error });
+    if (!control.importDeviceBackup(backup))
+      return response.status(404).json({ error: 'No active server.' });
+    return response.json({ ok: true });
+  });
 
   router.post('/devices/:entityId', (request, response) => {
     const enabled = request.body?.enabled;
@@ -59,6 +72,8 @@ export function createDeviceRouter(control: RustplusControlService): Router {
     if (result === 'not-connected')
       return response.status(409).json({ error: 'Rust+ is not connected.' });
     if (result === 'unknown') return response.status(404).json({ error: 'Unknown group.' });
+    if (result === 'no-switches')
+      return response.status(409).json({ error: 'This group does not contain a switch.' });
     return response.status(202).json({ ok: true });
   });
 

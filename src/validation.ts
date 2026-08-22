@@ -1,4 +1,11 @@
-import type { FcmConfig, ServerProfile, SettingsInput } from './types';
+import type {
+  Device,
+  DeviceBackup,
+  DeviceGroup,
+  FcmConfig,
+  ServerProfile,
+  SettingsInput,
+} from './types';
 
 type Result<T> = T | { error: string };
 
@@ -100,9 +107,7 @@ export function groupInput(
   const deviceIds = Array.isArray(value.deviceIds)
     ? [...new Set(value.deviceIds.map((id) => String(id)))]
     : null;
-  const switchIds = new Set(
-    profile.devices.filter((device) => device.type !== 'alarm').map((device) => device.entityId),
-  );
+  const knownDeviceIds = new Set(profile.devices.map((device) => device.entityId));
   const groupedIds = new Set(
     profile.groups
       .filter((group) => group.id !== currentGroupId)
@@ -110,11 +115,68 @@ export function groupInput(
   );
   if (!name || name.length > 80)
     return { error: 'Group name must be between 1 and 80 characters.' };
-  if (!deviceIds?.length || deviceIds.some((id) => !switchIds.has(id)))
-    return { error: 'A group must contain one or more known switches.' };
+  if (!deviceIds?.length || deviceIds.some((id) => !knownDeviceIds.has(id)))
+    return { error: 'A group must contain one or more known devices.' };
   if (deviceIds.some((id) => groupedIds.has(id)))
-    return { error: 'A switch can belong to only one group.' };
+    return { error: 'A device can belong to only one group.' };
   return { name, deviceIds };
+}
+
+export function deviceBackupInput(body: unknown): Result<DeviceBackup> {
+  const value = (body || {}) as { version?: unknown; devices?: unknown; groups?: unknown };
+  if (value.version !== 1 || !Array.isArray(value.devices) || !Array.isArray(value.groups))
+    return { error: 'Invalid device backup file.' };
+
+  const devices: Device[] = [];
+  const deviceIds = new Set<string>();
+  for (let index = 0; index < value.devices.length; index += 1) {
+    const item = value.devices[index] as Partial<Device> | null;
+    const name = String(item?.name || '').trim();
+    const entityId = String(item?.entityId || '');
+    if (!name || name.length > 80 || !/^-?\d+$/.test(entityId))
+      return { error: 'Each backup device needs a name and numeric entity ID.' };
+    if (item?.type !== 'switch' && item?.type !== 'alarm')
+      return { error: 'Each backup device needs a valid type.' };
+    if (deviceIds.has(entityId)) return { error: 'Backup device IDs must be unique.' };
+    const sortOrder = Number(item?.sortOrder);
+    devices.push({
+      name,
+      entityId,
+      type: item.type,
+      sortOrder: Number.isFinite(sortOrder) ? sortOrder : index,
+    });
+    deviceIds.add(entityId);
+  }
+
+  const groups: DeviceGroup[] = [];
+  const groupIds = new Set<string>();
+  const groupedDeviceIds = new Set<string>();
+  for (let index = 0; index < value.groups.length; index += 1) {
+    const item = value.groups[index] as Partial<DeviceGroup> | null;
+    const id = String(item?.id || '').trim();
+    const name = String(item?.name || '').trim();
+    const members = Array.isArray(item?.deviceIds)
+      ? [...new Set(item.deviceIds.map((deviceId) => String(deviceId)))]
+      : [];
+    if (!id || id.length > 160 || !name || name.length > 80 || !members.length)
+      return { error: 'Each backup group needs an ID, name and at least one device.' };
+    if (groupIds.has(id)) return { error: 'Backup group IDs must be unique.' };
+    if (members.some((deviceId) => !deviceIds.has(deviceId)))
+      return { error: 'Backup groups can contain only exported devices.' };
+    if (members.some((deviceId) => groupedDeviceIds.has(deviceId)))
+      return { error: 'A backup device can belong to only one group.' };
+    const sortOrder = Number(item?.sortOrder);
+    groups.push({
+      id,
+      name,
+      deviceIds: members,
+      sortOrder: Number.isFinite(sortOrder) ? sortOrder : index,
+    });
+    groupIds.add(id);
+    members.forEach((deviceId) => groupedDeviceIds.add(deviceId));
+  }
+
+  return { version: 1, devices, groups };
 }
 
 export function discordWebhookUrl(value: unknown): Result<{ url: string }> {

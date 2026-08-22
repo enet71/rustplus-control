@@ -22,6 +22,12 @@ export interface DeviceGroup {
   sortOrder?: number;
 }
 
+export interface DeviceBackup {
+  version: 1;
+  devices: Device[];
+  groups: DeviceGroup[];
+}
+
 export interface ServerProfile {
   id: string;
   name: string;

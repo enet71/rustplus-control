@@ -27,6 +27,9 @@ const settingsExpoPushToken = document.querySelector('#settings-expo-push-token'
 const settingsRustplusAuthToken = document.querySelector('#settings-rustplus-auth-token');
 const showSettingsSecrets = document.querySelector('#show-settings-secrets');
 const createGroupButton = document.querySelector('#create-group');
+const importDevicesButton = document.querySelector('#import-devices');
+const exportDevicesButton = document.querySelector('#export-devices');
+const importDevicesFile = document.querySelector('#import-devices-file');
 const pairingSection = document.querySelector('#pairing');
 const pairingStatus = document.querySelector('#pairing-status');
 const registerButton = document.querySelector('#register-rustplus');
@@ -67,6 +70,8 @@ function render(state) {
   serverSelect.disabled = !state.config.servers.length;
   configureDiscordButton.disabled = !state.config.activeServerId;
   editSettingsButton.disabled = !state.config.activeServerId;
+  importDevicesButton.disabled = !state.config.activeServerId;
+  exportDevicesButton.disabled = !state.config.activeServerId;
   discordState.textContent = state.config.discordConfigured ? 'Discord alarm notifications are enabled.' : 'Discord alarm notifications are not configured.';
   renderControls(state);
 }
@@ -124,8 +129,7 @@ function renderDeviceRow(device, state, position, count, child = false) {
 }
 
 function renderControls(state) {
-  const switches = state.config.devices.filter((device) => device.type !== 'alarm');
-  createGroupButton.disabled = !switches.length;
+  createGroupButton.disabled = !state.config.devices.length;
   controlList.innerHTML = '';
   const groups = state.config.groups || [];
   const groupedIds = new Set(groups.flatMap((group) => group.deviceIds));
@@ -137,18 +141,20 @@ function renderControls(state) {
       continue;
     }
     const group = item;
-    const allEnabled = group.deviceIds.every((entityId) => state.deviceStates[entityId] === true);
+    const groupDevices = group.deviceIds.map((entityId) => state.config.devices.find((device) => device.entityId === entityId)).filter(Boolean);
+    const groupSwitches = groupDevices.filter((device) => device.type !== 'alarm');
+    const allEnabled = groupSwitches.every((device) => state.deviceStates[device.entityId] === true);
     const collapsed = isGroupCollapsed(state.config.activeServerId || '', group.id);
     const groupRow = document.createElement('article');
     groupRow.className = 'control-row group-row';
-    groupRow.innerHTML = `<div class="control-info"><h3>${escapeHtml(group.name)}</h3><p>${group.deviceIds.length} switch${group.deviceIds.length === 1 ? '' : 'es'}</p></div><div class="control-actions group-actions"><div class="group-action-row"><button type="button" class="secondary edit-group" aria-label="Edit ${escapeHtml(group.name)}">Edit</button><button type="button" class="collapse-group ${collapsed ? 'is-collapsed' : ''}" title="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(group.name)}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(group.name)}" aria-expanded="${!collapsed}"><span class="collapse-icon" aria-hidden="true"></span></button></div><div class="group-action-row"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(group.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(group.name)} down">&darr;</button>${toggleMarkup(group.name, allEnabled, 'group-switch')}</div></div>`;
+    groupRow.innerHTML = `<div class="control-info"><h3>${escapeHtml(group.name)}</h3><p>${groupDevices.length} device${groupDevices.length === 1 ? '' : 's'}</p></div><div class="control-actions group-actions"><div class="group-action-row"><button type="button" class="secondary edit-group" aria-label="Edit ${escapeHtml(group.name)}">Edit</button><button type="button" class="collapse-group ${collapsed ? 'is-collapsed' : ''}" title="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(group.name)}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(group.name)}" aria-expanded="${!collapsed}"><span class="collapse-icon" aria-hidden="true"></span></button></div><div class="group-action-row"><button type="button" class="sort-button move-up" title="Move up" aria-label="Move ${escapeHtml(group.name)} up">&uarr;</button><button type="button" class="sort-button move-down" title="Move down" aria-label="Move ${escapeHtml(group.name)} down">&darr;</button>${groupSwitches.length ? toggleMarkup(group.name, allEnabled, 'group-switch') : ''}</div></div>`;
     addOrderControls(groupRow, 'group', group.id, index, rootItems.length);
     groupRow.querySelector('.collapse-group').addEventListener('click', () => {
       toggleGroupCollapsed(state.config.activeServerId || '', group.id);
       renderControls(state);
     });
     groupRow.querySelector('.edit-group').addEventListener('click', () => openGroupEditor(group));
-    groupRow.querySelector('.group-switch').addEventListener('click', (event) => toggleGroup(group.id, !allEnabled, event.currentTarget));
+    if (groupSwitches.length) groupRow.querySelector('.group-switch').addEventListener('click', (event) => toggleGroup(group.id, !allEnabled, event.currentTarget));
     controlList.append(groupRow);
     const children = sortItems(group.deviceIds.map((entityId) => state.config.devices.find((device) => device.entityId === entityId)).filter(Boolean));
     if (!collapsed) children.forEach((device, childIndex) => controlList.append(renderDeviceRow(device, state, childIndex, children.length, true)));
@@ -206,17 +212,16 @@ function openGroupEditor(group = null) {
   activeGroup = group;
   const selectedIds = new Set(group?.deviceIds || []);
   const groupedIds = new Set((currentState.config.groups || []).filter((item) => item.id !== group?.id).flatMap((item) => item.deviceIds));
-  groupDialogTitle.textContent = group ? 'Edit switch group' : 'New switch group';
+  groupDialogTitle.textContent = group ? 'Edit device group' : 'New device group';
   groupName.value = group?.name || '';
   deleteGroupButton.hidden = !group;
-  groupMembers.innerHTML = '<legend>Switches</legend>';
-  for (const device of currentState.config.devices.filter((item) => item.type !== 'alarm')) {
+  groupMembers.innerHTML = '<legend>Devices</legend>';
+  for (const device of currentState.config.devices.filter((item) => !groupedIds.has(item.entityId))) {
     const label = document.createElement('label');
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.value = device.entityId;
     input.checked = selectedIds.has(device.entityId);
-    input.disabled = groupedIds.has(device.entityId);
     label.append(input, document.createTextNode(device.name));
     groupMembers.append(label);
   }
@@ -270,6 +275,40 @@ async function moveItem(type, id, direction) {
   await refresh();
 }
 
+async function exportDevices() {
+  exportDevicesButton.disabled = true;
+  try {
+    const result = await apiFetch('/api/device-backup');
+    if (!result.ok) { feedback.textContent = (await result.json()).error || 'Unable to export devices.'; return; }
+    const backup = await result.json();
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const download = document.createElement('a');
+    download.href = URL.createObjectURL(blob);
+    download.download = `rustplus-devices-${new Date().toISOString().slice(0, 10)}.json`;
+    download.click();
+    URL.revokeObjectURL(download.href);
+  } finally {
+    exportDevicesButton.disabled = false;
+  }
+}
+
+async function importDevices(file) {
+  try {
+    const backup = JSON.parse(await file.text());
+    if (!confirm('Replace the current devices and groups with this backup?')) return;
+    importDevicesButton.disabled = true;
+    const result = await apiFetch('/api/device-backup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backup) });
+    if (!result.ok) { feedback.textContent = (await result.json()).error || 'Unable to import devices.'; return; }
+    feedback.textContent = 'Devices imported.';
+    await refresh();
+  } catch {
+    feedback.textContent = 'Choose a valid device backup file.';
+  } finally {
+    importDevicesButton.disabled = false;
+    importDevicesFile.value = '';
+  }
+}
+
 function escapeHtml(value) { const div = document.createElement('div'); div.textContent = value; return div.innerHTML; }
 function normalizeEvent(event) {
   const createdAt = new Date(event?.createdAt);
@@ -317,6 +356,9 @@ function showEvent(event) {
 }
 document.querySelector('#register-rustplus').addEventListener('click', async () => { await apiFetch('/api/fcm/register', { method: 'POST' }); refreshPairingStatus(); });
 document.querySelector('#logout-rustplus').addEventListener('click', async () => { await apiFetch('/api/fcm/logout', { method: 'POST' }); pairingDialog.close(); activePairing = null; await refreshPairingStatus(); await refresh(); });
+exportDevicesButton.addEventListener('click', exportDevices);
+importDevicesButton.addEventListener('click', () => importDevicesFile.click());
+importDevicesFile.addEventListener('change', () => { if (importDevicesFile.files?.[0]) importDevices(importDevicesFile.files[0]); });
 signOutButton.addEventListener('click', signOut);
 serverSelect.addEventListener('change', async () => {
   if (!serverSelect.value) return;

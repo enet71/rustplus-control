@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { groupInput, settingsInput } = require('../dist/validation');
+const { deviceBackupInput, groupInput, settingsInput } = require('../dist/validation');
 
 test('settingsInput accepts complete server and FCM settings', () => {
   const result = settingsInput({
@@ -62,20 +62,51 @@ test('settingsInput rejects invalid Rust+ port', () => {
   assert.deepEqual(result, { error: 'Port must be between 1 and 65535.' });
 });
 
-test('groupInput prevents a switch from being in two groups', () => {
+test('groupInput accepts all device types and prevents duplicate membership', () => {
   const profile = {
     id: 'server',
     name: 'Server',
     server: {},
-    devices: [{ entityId: '1', name: 'Door', type: 'switch' }],
+    devices: [
+      { entityId: '1', name: 'Door', type: 'switch' },
+      { entityId: '2', name: 'Alarm', type: 'alarm' },
+    ],
     groups: [{ id: 'existing', name: 'Existing', deviceIds: ['1'] }],
   };
 
   assert.deepEqual(groupInput({ name: 'Duplicate', deviceIds: ['1'] }, profile), {
-    error: 'A switch can belong to only one group.',
+    error: 'A device can belong to only one group.',
   });
   assert.deepEqual(groupInput({ name: 'Existing', deviceIds: ['1'] }, profile, 'existing'), {
     name: 'Existing',
     deviceIds: ['1'],
+  });
+  assert.deepEqual(groupInput({ name: 'Alarms', deviceIds: ['2'] }, profile), {
+    name: 'Alarms',
+    deviceIds: ['2'],
+  });
+});
+
+test('deviceBackupInput accepts groups and rejects repeated membership', () => {
+  const backup = {
+    version: 1,
+    devices: [
+      { entityId: '1', name: 'Door', type: 'switch' },
+      { entityId: '2', name: 'Alarm', type: 'alarm' },
+    ],
+    groups: [{ id: 'mixed', name: 'Base', deviceIds: ['1', '2'] }],
+  };
+
+  assert.deepEqual(deviceBackupInput(backup), {
+    version: 1,
+    devices: [
+      { entityId: '1', name: 'Door', type: 'switch', sortOrder: 0 },
+      { entityId: '2', name: 'Alarm', type: 'alarm', sortOrder: 1 },
+    ],
+    groups: [{ id: 'mixed', name: 'Base', deviceIds: ['1', '2'], sortOrder: 0 }],
+  });
+  backup.groups.push({ id: 'second', name: 'Duplicate', deviceIds: ['1'] });
+  assert.deepEqual(deviceBackupInput(backup), {
+    error: 'A backup device can belong to only one group.',
   });
 });
