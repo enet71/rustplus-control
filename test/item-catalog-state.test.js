@@ -91,3 +91,48 @@ test('storage monitor refreshes after a pipe change pulse without items', () => 
 
   assert.equal(control.getState().storageStates.storage.items[0].quantity, 8);
 });
+
+test('storage monitors are polled when broadcasts are absent', () => {
+  const repository = {
+    migrateLegacyFcmConfig() {},
+    loadConfig() {
+      return {
+        activeServerId: 'server',
+        servers: [
+          {
+            id: 'server',
+            name: 'Server',
+            server: {},
+            devices: [{ entityId: 'storage', name: 'Locker', type: 'storage' }],
+            groups: [],
+          },
+        ],
+      };
+    },
+    hasFcmConfig() {
+      return false;
+    },
+  };
+  const control = new RustplusControlService(repository, process.cwd(), false);
+  const client = {
+    getEntityInfo(_entityId, callback) {
+      callback({
+        response: {
+          entityInfo: {
+            payload: {
+              capacity: 12,
+              items: [{ itemId: 1, quantity: 8, itemIsBlueprint: false }],
+            },
+          },
+        },
+      });
+    },
+  };
+  control.client = client;
+  control.status = { connected: true, message: 'Connected' };
+
+  control.startStoragePolling(client, [{ entityId: 'storage', name: 'Locker', type: 'storage' }]);
+
+  assert.equal(control.getState().storageStates.storage.items[0].quantity, 8);
+  control.stopStoragePolling();
+});

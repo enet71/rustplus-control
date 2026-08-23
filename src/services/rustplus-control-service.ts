@@ -21,6 +21,7 @@ import { RustItemCatalog } from './rust-item-catalog';
 const RustPlus: any = require('@liamcottle/rustplus.js');
 const RECONNECT_DELAY_MS = 5000;
 const DEVICE_STATE_REQUEST_DELAY_MS = 200;
+const STORAGE_POLLING_INTERVAL_MS = 5000;
 
 function errorSummary(error: unknown): string {
   const value = error as { name?: unknown; message?: unknown } | null;
@@ -48,6 +49,7 @@ export class RustplusControlService {
   private readonly eventClients = new Set<Response>();
   private markerPolling: NodeJS.Timeout | null = null;
   private teamPolling: NodeJS.Timeout | null = null;
+  private storagePolling: NodeJS.Timeout | null = null;
   private deviceStateLoadingTimer: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private fcmRegisterProcess: ChildProcess | null = null;
@@ -148,6 +150,7 @@ export class RustplusControlService {
   logoutFcm(): void {
     this.cancelReconnect();
     this.stopDeviceStateLoading();
+    this.stopStoragePolling();
     this.fcmRegisterProcess?.kill();
     this.fcmListenerProcess?.kill();
     this.fcmRegisterProcess = null;
@@ -501,6 +504,7 @@ export class RustplusControlService {
     }
   }
   private handleEntityChanged(rustplus: any, message: any): void {
+    console.log(rustplus, message);
     const changed = message.broadcast?.entityChanged;
     const payload = changed?.payload;
     if (!changed || !payload) return;
@@ -805,6 +809,21 @@ export class RustplusControlService {
     poll();
     this.teamPolling = setInterval(poll, 10000);
   }
+  private startStoragePolling(rustplus: any, devices: Device[]): void {
+    this.stopStoragePolling();
+    const storageDevices = devices.filter((device) => device.type === 'storage');
+    if (!storageDevices.length) return;
+    const poll = () => {
+      if (this.client !== rustplus || !this.status.connected) return;
+      for (const device of storageDevices) this.refreshStorageState(rustplus, device.entityId);
+    };
+    poll();
+    this.storagePolling = setInterval(poll, STORAGE_POLLING_INTERVAL_MS);
+  }
+  private stopStoragePolling(): void {
+    if (this.storagePolling) clearInterval(this.storagePolling);
+    this.storagePolling = null;
+  }
   private cancelReconnect(): void {
     if (!this.reconnectTimer) return;
     clearTimeout(this.reconnectTimer);
@@ -866,6 +885,7 @@ export class RustplusControlService {
   private connect(): void {
     this.cancelReconnect();
     this.stopDeviceStateLoading();
+    this.stopStoragePolling();
     if (this.client) {
       const previous = this.client;
       this.client = null;
@@ -896,6 +916,7 @@ export class RustplusControlService {
       this.status = { connected: true, message: 'Connected' };
       logRust('connected');
       this.loadDeviceStates(rustplus, profile.devices);
+      this.startStoragePolling(rustplus, profile.devices);
       this.startMarkerPolling();
       this.startTeamPolling();
     });
@@ -906,6 +927,7 @@ export class RustplusControlService {
       if (this.client !== rustplus) return;
       logRust(`disconnected; retrying in ${RECONNECT_DELAY_MS / 1000}s`);
       this.stopDeviceStateLoading();
+      this.stopStoragePolling();
       if (this.markerPolling) clearInterval(this.markerPolling);
       if (this.teamPolling) clearInterval(this.teamPolling);
       this.scheduleReconnect();
@@ -914,6 +936,7 @@ export class RustplusControlService {
       if (this.client !== rustplus) return;
       logRust(`socket error: ${errorSummary(error)}`);
       this.status = { connected: false, message: `Connection error: ${error.message}` };
+      this.stopStoragePolling();
       this.scheduleReconnect();
     });
     rustplus.on('message', (message: any) => {
