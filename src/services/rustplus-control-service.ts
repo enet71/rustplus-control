@@ -474,14 +474,57 @@ export class RustplusControlService {
     entityId: string,
     payload: { capacity?: unknown; items?: unknown },
   ): void {
-    const items = Array.isArray(payload.items)
-      ? payload.items.map((item: any) => ({
-          itemId: Number(item.itemId),
-          quantity: Number(item.quantity),
-          itemIsBlueprint: Boolean(item.itemIsBlueprint),
-        }))
-      : [];
-    this.storageStates[String(entityId)] = { capacity: Number(payload.capacity || 0), items };
+    if (!Array.isArray(payload.items)) return;
+    const items = payload.items.map((item: any) => ({
+      itemId: Number(item.itemId),
+      quantity: Number(item.quantity),
+      itemIsBlueprint: Boolean(item.itemIsBlueprint),
+    }));
+    const capacity = Number(payload.capacity);
+    this.storageStates[String(entityId)] = {
+      capacity: Number.isFinite(capacity)
+        ? capacity
+        : (this.storageStates[String(entityId)]?.capacity ?? 0),
+      items,
+    };
+  }
+  private refreshStorageState(rustplus: any, entityId: string): void {
+    try {
+      rustplus.getEntityInfo(String(entityId), (message: any) => {
+        if (this.client !== rustplus) return true;
+        if (!message.response?.error)
+          this.publishStorageState(entityId, message.response?.entityInfo?.payload || {});
+        return true;
+      });
+    } catch (error) {
+      logRust(`storage state refresh failed: ${errorSummary(error)}`);
+    }
+  }
+  private handleEntityChanged(rustplus: any, message: any): void {
+    const changed = message.broadcast?.entityChanged;
+    const payload = changed?.payload;
+    if (!changed || !payload) return;
+    const entityId = String(changed.entityId);
+    const device = this.activeProfile()?.devices.find((item) => item.entityId === entityId);
+    if (device?.type === 'storage') {
+      if (Array.isArray(payload.items)) this.publishStorageState(entityId, payload);
+      // Pipe changes may only emit an on/off pulse, without an item payload.
+      else if (payload.value === false) this.refreshStorageState(rustplus, entityId);
+      return;
+    }
+    if (typeof payload.value !== 'boolean') return;
+    const wasActive = this.deviceStates[entityId];
+    this.publishEntityState(entityId, payload.value);
+    if (device?.type === 'alarm' && payload.value && !wasActive) {
+      this.publishEvent({
+        id: `${entityId}:${Date.now()}`,
+        title: 'Smart Alarm',
+        body: `${device.name} was triggered`,
+        type: 'alarm',
+        createdAt: new Date().toISOString(),
+      });
+      void this.sendDiscordAlarm(this.activeProfile(), device);
+    }
   }
   private publishEvent(event: RustEvent): void {
     const payload = `event: rust-event\ndata: ${JSON.stringify(event)}\n\n`;
@@ -875,25 +918,7 @@ export class RustplusControlService {
     });
     rustplus.on('message', (message: any) => {
       if (this.client !== rustplus) return;
-      const changed = message.broadcast?.entityChanged;
-      if (changed && (typeof changed.payload.value === 'boolean' || changed.payload.items)) {
-        const entityId = String(changed.entityId);
-        const wasActive = this.deviceStates[entityId];
-        if (typeof changed.payload.value === 'boolean')
-          this.publishEntityState(entityId, changed.payload.value);
-        const device = this.activeProfile()?.devices.find((item) => item.entityId === entityId);
-        if (device?.type === 'storage') this.publishStorageState(entityId, changed.payload);
-        if (device?.type === 'alarm' && changed.payload.value && !wasActive) {
-          this.publishEvent({
-            id: `${entityId}:${Date.now()}`,
-            title: 'Smart Alarm',
-            body: `${device.name} was triggered`,
-            type: 'alarm',
-            createdAt: new Date().toISOString(),
-          });
-          void this.sendDiscordAlarm(this.activeProfile(), device);
-        }
-      }
+      this.handleEntityChanged(rustplus, message);
     });
     rustplus.connect();
   }
