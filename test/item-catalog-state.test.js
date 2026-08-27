@@ -1,6 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { RustplusControlService } = require('../dist/services/rustplus-control-service');
+
+test('Rust+ protobuf patch makes AppInfo queuedPlayers optional', () => {
+  const proto = fs.readFileSync(
+    path.join(process.cwd(), 'node_modules', '@liamcottle', 'rustplus.js', 'rustplus.proto'),
+    'utf8',
+  );
+  assert.match(proto, /message AppInfo \{[\s\S]*?optional uint32 queuedPlayers = 9;/);
+});
 
 test('state uses catalog icons for devices and storage items', () => {
   const catalogItem = {
@@ -178,4 +188,71 @@ test('device state loading retries the same device after a Rust+ rate limit', ()
     control.stopDeviceStateLoading();
     global.setTimeout = setTimeoutOriginal;
   }
+});
+
+test('Rust+ map image is exposed with its coordinate metadata', () => {
+  const repository = {
+    migrateLegacyFcmConfig() {},
+    loadConfig() {
+      return { activeServerId: 'server', servers: [] };
+    },
+    hasFcmConfig() {
+      return false;
+    },
+  };
+  const control = new RustplusControlService(repository, process.cwd(), false);
+  const client = {
+    getInfo(callback) {
+      callback({ response: { info: { mapSize: 4000 } } });
+    },
+    getMap(callback) {
+      callback({
+        response: {
+          map: {
+            width: 4500,
+            height: 4500,
+            oceanMargin: 100,
+            jpgImage: Buffer.from('map-image'),
+          },
+        },
+      });
+    },
+  };
+  control.client = client;
+
+  control.loadMap(client);
+
+  assert.deepEqual(control.getMap(), {
+    width: 4500,
+    height: 4500,
+    oceanMargin: 100,
+    mapSize: 4000,
+    image: 'data:image/jpeg;base64,bWFwLWltYWdl',
+  });
+});
+
+test('polling listeners start before the device state queue', () => {
+  const repository = {
+    migrateLegacyFcmConfig() {},
+    loadConfig() {
+      return { activeServerId: 'server', servers: [] };
+    },
+    hasFcmConfig() {
+      return false;
+    },
+  };
+  const control = new RustplusControlService(repository, process.cwd(), false);
+  const calls = [];
+  const client = {};
+  control.loadMap = () => calls.push('map');
+  control.startMarkerPolling = () => calls.push('markers');
+  control.startTeamPolling = () => calls.push('team');
+  control.startTeamChatPolling = () => calls.push('chat');
+  control.startStoragePolling = () => calls.push('storage');
+  control.loadDeviceStates = () => calls.push('controls');
+
+  control.startPollingListeners(client, []);
+  control.loadDeviceStates(client, []);
+
+  assert.deepEqual(calls, ['map', 'markers', 'team', 'chat', 'storage', 'controls']);
 });

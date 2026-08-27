@@ -51,6 +51,15 @@ const saveGroup = document.querySelector('#save-group');
 const deleteGroupButton = document.querySelector('#delete-group');
 const serverSelect = document.querySelector('#server-select');
 const signOutButton = document.querySelector('#sign-out');
+const controlsTab = document.querySelector('#controls-tab');
+const mapTab = document.querySelector('#map-tab');
+const controlsView = document.querySelector('#controls-view');
+const mapView = document.querySelector('#map-view');
+const mapStatus = document.querySelector('#map-status');
+const mapCanvas = document.querySelector('#map-canvas');
+const rustMapImage = document.querySelector('#rust-map-image');
+const mapGridLayer = document.querySelector('#map-grid-layer');
+const mapMarkerLayer = document.querySelector('#map-marker-layer');
 const COLLAPSED_GROUPS_STORAGE_KEY = 'rustplus-control.collapsed-groups';
 const EVENTS_STORAGE_KEY = 'rustplus-control.events';
 const MAX_STORED_EVENTS = 150;
@@ -58,9 +67,17 @@ let activePairing = null;
 let activeDevice = null;
 let activeGroup = null;
 let currentState = null;
+let activeView = 'controls';
+let mapData = null;
+let loadedMapServerId = null;
 
 function render(state) {
   currentState = state;
+  if (loadedMapServerId && loadedMapServerId !== state.config.activeServerId) {
+    mapData = null;
+    loadedMapServerId = null;
+    rustMapImage.removeAttribute('src');
+  }
   connection.textContent = state.message;
   connection.className = `status ${state.connected ? 'online' : ''}`;
   serverSelect.innerHTML = '';
@@ -74,6 +91,125 @@ function render(state) {
   exportDevicesButton.disabled = !state.config.activeServerId;
   discordState.textContent = state.config.discordConfigured ? 'Discord alarm notifications are enabled.' : 'Discord alarm notifications are not configured.';
   renderControls(state);
+  renderMapMarkers(state);
+  if (activeView === 'map') void loadMap(state);
+}
+
+function setActiveView(view) {
+  activeView = view;
+  const mapActive = view === 'map';
+  controlsView.hidden = mapActive;
+  mapView.hidden = !mapActive;
+  controlsTab.classList.toggle('is-active', !mapActive);
+  controlsTab.setAttribute('aria-selected', String(!mapActive));
+  mapTab.classList.toggle('is-active', mapActive);
+  mapTab.setAttribute('aria-selected', String(mapActive));
+  if (mapActive && currentState) void loadMap(currentState);
+}
+
+async function loadMap(state) {
+  const serverId = state.config.activeServerId;
+  if (!serverId) {
+    mapStatus.textContent = 'Select a server to view its map.';
+    return;
+  }
+  if (loadedMapServerId === serverId && mapData) return;
+  mapStatus.textContent = 'Loading map...';
+  const response = await apiFetch('/api/map');
+  if (!response.ok) {
+    mapStatus.textContent = 'Map is not available yet.';
+    return;
+  }
+  mapData = await response.json();
+  loadedMapServerId = serverId;
+  configureMapCanvas();
+  mapStatus.textContent = '';
+  renderMapMarkers(state);
+}
+
+function configureMapCanvas() {
+  const width = Number(mapData?.width);
+  const height = Number(mapData?.height);
+  const margin = Number(mapData?.oceanMargin || 0);
+  const playableWidth = width - margin * 2;
+  const playableHeight = height - margin * 2;
+  if (!Number.isFinite(playableWidth) || !Number.isFinite(playableHeight) || playableWidth <= 0 || playableHeight <= 0) return;
+  mapCanvas.style.aspectRatio = `${playableWidth} / ${playableHeight}`;
+  rustMapImage.style.width = `${(width / playableWidth) * 100}%`;
+  rustMapImage.style.height = `${(height / playableHeight) * 100}%`;
+  rustMapImage.style.left = `${(-margin / playableWidth) * 100}%`;
+  rustMapImage.style.top = `${(-margin / playableHeight) * 100}%`;
+  rustMapImage.src = mapData.image;
+  renderMapGrid();
+}
+
+function mapPosition(x, y) {
+  if (!mapData) return null;
+  const mapSize = Number(mapData.mapSize);
+  const left = (Number(x) / mapSize) * 100;
+  const top = ((mapSize - Number(y)) / mapSize) * 100;
+  if (!Number.isFinite(left) || !Number.isFinite(top) || left < 0 || left > 100 || top < 0 || top > 100) return null;
+  return { left, top };
+}
+
+function gridColumnName(index) {
+  let value = index + 1;
+  let name = '';
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    value = Math.floor((value - 1) / 26);
+  }
+  return name;
+}
+
+function renderMapGrid() {
+  mapGridLayer.replaceChildren();
+  const mapSize = Number(mapData?.mapSize);
+  if (!Number.isFinite(mapSize) || mapSize <= 0) return;
+  const cellSize = 150;
+  const columns = Math.ceil(mapSize / cellSize);
+  const rows = Math.ceil(mapSize / cellSize);
+  mapGridLayer.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+  mapGridLayer.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+  const cells = document.createDocumentFragment();
+  for (let row = 0; row < rows; row += 1)
+    for (let column = 0; column < columns; column += 1) {
+      const cell = document.createElement('span');
+      cell.className = 'map-grid-cell';
+      cell.textContent = `${gridColumnName(column)}${row + 1}`;
+      cells.append(cell);
+    }
+  mapGridLayer.append(cells);
+}
+
+function markerLabel(marker) {
+  if (marker.name) return marker.name;
+  return ({ 3: 'Vending machine', 4: 'CH47', 5: 'Cargo Ship', 8: 'Patrol Helicopter' })[marker.type] || 'Map marker';
+}
+
+function appendMapMarker(marker, className, label) {
+  const position = mapPosition(marker.x, marker.y);
+  if (!position) return;
+  const element = document.createElement('span');
+  element.className = `map-marker ${className}`;
+  element.style.left = `${position.left}%`;
+  element.style.top = `${position.top}%`;
+  element.title = label;
+  element.setAttribute('aria-label', label);
+  mapMarkerLayer.append(element);
+}
+
+function renderMapMarkers(state) {
+  mapMarkerLayer.replaceChildren();
+  if (!mapData) return;
+  for (const member of state.teamMapMembers || []) {
+    if (member.isOnline) appendMapMarker(member, 'team', member.name);
+  }
+  for (const marker of state.mapMarkers || []) {
+    const className = [4, 5, 8].includes(marker.type) ? 'event' : 'server';
+    appendMapMarker(marker, className, markerLabel(marker));
+  }
 }
 
 function sortItems(items) {
@@ -366,6 +502,8 @@ function showEvent(event) {
 }
 document.querySelector('#register-rustplus').addEventListener('click', async () => { await apiFetch('/api/fcm/register', { method: 'POST' }); refreshPairingStatus(); });
 document.querySelector('#logout-rustplus').addEventListener('click', async () => { await apiFetch('/api/fcm/logout', { method: 'POST' }); pairingDialog.close(); activePairing = null; await refreshPairingStatus(); await refresh(); });
+controlsTab.addEventListener('click', () => setActiveView('controls'));
+mapTab.addEventListener('click', () => setActiveView('map'));
 exportDevicesButton.addEventListener('click', exportDevices);
 importDevicesButton.addEventListener('click', () => importDevicesFile.click());
 importDevicesFile.addEventListener('change', () => { if (importDevicesFile.files?.[0]) importDevices(importDevicesFile.files[0]); });

@@ -31,6 +31,15 @@ const TEAM_CHAT_MESSAGE_PREFIX = '[rust-control]';
 type SwitchCommandResult = 'not-connected' | 'unknown' | 'no-switches' | 'failed' | null;
 type TeamChatRequest = { rustplus: any; timeout: NodeJS.Timeout | null };
 type ChatTarget = { name: string; switchIds: string[]; isGroup: boolean };
+type MapMarker = { id: string; type: number; x: number; y: number; name: string };
+type TeamMapMember = { id: string; name: string; x: number; y: number; isOnline: boolean };
+type RustMap = {
+  width: number;
+  height: number;
+  oceanMargin: number;
+  mapSize: number;
+  image: string;
+};
 
 function errorSummary(error: unknown): string {
   const value = error as { name?: unknown; message?: unknown } | null;
@@ -54,6 +63,9 @@ export class RustplusControlService {
   private deviceStates: Record<string, boolean> = {};
   private storageStates: Record<string, StorageState> = {};
   private markerSnapshots = new Map<string, string>();
+  private mapMarkers: MapMarker[] = [];
+  private teamMapMembers: TeamMapMember[] = [];
+  private map: RustMap | null = null;
   private teamDeaths = new Map<string, number>();
   private readonly eventClients = new Set<Response>();
   private markerPolling: NodeJS.Timeout | null = null;
@@ -111,7 +123,14 @@ export class RustplusControlService {
       config: this.publicConfig(),
       deviceStates: this.deviceStates,
       storageStates: this.publicStorageStates(),
+      mapMarkers: this.mapMarkers,
+      teamMapMembers: this.teamMapMembers,
+      mapReady: Boolean(this.map),
     };
+  }
+
+  getMap(): RustMap | null {
+    return this.map;
   }
 
   getFcmStatus(): FcmStatus & { registrationAvailable: boolean } {
@@ -176,6 +195,7 @@ export class RustplusControlService {
     this.client = null;
     this.deviceStates = {};
     this.storageStates = {};
+    this.clearMapState();
     this.status = { connected: false, message: 'Log in to connect Rust+' };
     this.fcmStatus = { registered: false, listening: false, message: 'Not registered' };
   }
@@ -204,6 +224,7 @@ export class RustplusControlService {
     this.saveConfig({ ...this.config, activeServerId: profile.id });
     this.deviceStates = {};
     this.storageStates = {};
+    this.clearMapState();
     if (this.fcmStatus.registered) this.connect();
     else this.status = { connected: false, message: 'Log in to connect Rust+' };
     return true;
@@ -421,6 +442,12 @@ export class RustplusControlService {
         },
       ]),
     );
+  }
+
+  private clearMapState(): void {
+    this.map = null;
+    this.mapMarkers = [];
+    this.teamMapMembers = [];
   }
 
   private reconcileGroups(groups: DeviceGroup[], devices: Device[]): DeviceGroup[] {
@@ -776,6 +803,15 @@ export class RustplusControlService {
       this.client.getMapMarkers((message: any) => {
         const markers = message.response?.mapMarkers?.markers;
         if (!Array.isArray(markers)) return true;
+        this.mapMarkers = markers
+          .map((marker: any) => ({
+            id: String(marker.id),
+            type: Number(marker.type),
+            x: Number(marker.x),
+            y: Number(marker.y),
+            name: String(marker.name || ''),
+          }))
+          .filter((marker: MapMarker) => Number.isFinite(marker.x) && Number.isFinite(marker.y));
         const next = new Map(
           markers.map((marker: any) => [
             String(marker.id),
@@ -833,6 +869,17 @@ export class RustplusControlService {
       this.client.getTeamInfo((message: any) => {
         const members = message.response?.teamInfo?.members;
         if (!Array.isArray(members)) return true;
+        this.teamMapMembers = members
+          .map((member: any) => ({
+            id: String(member.steamId),
+            name: String(member.name || 'Teammate'),
+            x: Number(member.x),
+            y: Number(member.y),
+            isOnline: Boolean(member.isOnline),
+          }))
+          .filter(
+            (member: TeamMapMember) => Number.isFinite(member.x) && Number.isFinite(member.y),
+          );
         const next = new Map(
           members.map((member: any) => [String(member.steamId), Number(member.deathTime || 0)]),
         );
@@ -860,6 +907,39 @@ export class RustplusControlService {
   private stopTeamPolling(): void {
     if (this.teamPolling) clearInterval(this.teamPolling);
     this.teamPolling = null;
+  }
+
+  private loadMap(rustplus: any): void {
+    try {
+      rustplus.getInfo((infoMessage: any) => {
+        const mapSize = Number(infoMessage.response?.info?.mapSize);
+        if (
+          this.client !== rustplus ||
+          infoMessage.response?.error ||
+          !Number.isFinite(mapSize) ||
+          mapSize <= 0
+        )
+          return true;
+        rustplus.getMap((message: any) => {
+          if (this.client !== rustplus || message.response?.error) return true;
+          const map = message.response?.map;
+          const width = Number(map?.width);
+          const height = Number(map?.height);
+          if (!map?.jpgImage || !Number.isFinite(width) || !Number.isFinite(height)) return true;
+          this.map = {
+            width,
+            height,
+            oceanMargin: Number.isFinite(Number(map.oceanMargin)) ? Number(map.oceanMargin) : 0,
+            mapSize,
+            image: `data:image/jpeg;base64,${Buffer.from(map.jpgImage).toString('base64')}`,
+          };
+          return true;
+        });
+        return true;
+      });
+    } catch (error) {
+      logRust(`map request failed: ${errorSummary(error)}`);
+    }
   }
 
   private startTeamChatPolling(rustplus: any): void {
@@ -1085,19 +1165,19 @@ export class RustplusControlService {
     this.deviceStateLoadingTimer = null;
   }
 
+  private startPollingListeners(rustplus: any, devices: Device[]): void {
+    this.loadMap(rustplus);
+    this.startMarkerPolling();
+    this.startTeamPolling();
+    this.startTeamChatPolling(rustplus);
+    this.startStoragePolling(rustplus, devices);
+  }
+
   private loadDeviceStates(rustplus: any, devices: Device[]): void {
     this.stopDeviceStateLoading();
     const pending = [...devices];
     const total = pending.length;
     logRust(`device state queue started: ${total} device(s)`);
-    const startPolling = () => {
-      if (this.client !== rustplus || !this.status.connected) return;
-      logRust(`device state queue completed: ${total} device(s)`);
-      this.startStoragePolling(rustplus, devices);
-      this.startMarkerPolling();
-      this.startTeamPolling();
-      this.startTeamChatPolling(rustplus);
-    };
     const scheduleNext = (delay: number, requestNext: () => void) => {
       this.deviceStateLoadingTimer = setTimeout(() => {
         this.deviceStateLoadingTimer = null;
@@ -1108,7 +1188,7 @@ export class RustplusControlService {
       if (this.client !== rustplus || !this.status.connected) return;
       const device = pending[0];
       if (!device) {
-        startPolling();
+        logRust(`device state queue completed: ${total} device(s)`);
         return;
       }
       const requestNumber = total - pending.length + 1;
@@ -1136,14 +1216,14 @@ export class RustplusControlService {
             this.publishEntityState(device.entityId, payload.value);
           pending.shift();
           if (pending.length) scheduleNext(DEVICE_STATE_REQUEST_DELAY_MS, requestNext);
-          else startPolling();
+          else logRust(`device state queue completed: ${total} device(s)`);
           return true;
         });
       } catch (error) {
         logRust(`device state request failed ${requestNumber}/${total}: ${errorSummary(error)}`);
         pending.shift();
         if (pending.length) scheduleNext(DEVICE_STATE_REQUEST_DELAY_MS, requestNext);
-        else startPolling();
+        else logRust(`device state queue completed: ${total} device(s)`);
       }
     };
     requestNext();
@@ -1171,6 +1251,7 @@ export class RustplusControlService {
     this.stopMarkerPolling();
     this.stopTeamPolling();
     this.stopTeamChatPolling();
+    this.clearMapState();
     if (this.client) {
       const previous = this.client;
       this.client = null;
@@ -1200,6 +1281,7 @@ export class RustplusControlService {
       this.cancelReconnect();
       this.status = { connected: true, message: 'Connected' };
       logRust('connected');
+      this.startPollingListeners(rustplus, profile.devices);
       this.loadDeviceStates(rustplus, profile.devices);
     });
     rustplus.on('connecting', () => {

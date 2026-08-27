@@ -2,6 +2,16 @@
 
 Use this file for confirmed, project-specific lessons. Add entries in reverse chronological order.
 
+## 2026-08-27 - Tolerate incomplete AppInfo responses
+
+**Context:** Loading Rust+ map metadata through `getInfo`.
+
+**What went wrong:** The installed protobuf schema required `AppInfo.queuedPlayers`, while the production Rust+ server omitted it and terminated the socket decode.
+
+**Required behavior:** Patch `AppInfo` fields as optional in the post-install script and verify the patched `queuedPlayers` field within the `AppInfo` message.
+
+**Evidence:** Production log reported `ProtocolError: missing required 'queuedPlayers'`.
+
 ## 2026-08-22 - Patch optional storage item fields
 
 **Context:** Loading Storage Monitor contents from a current Rust+ server.

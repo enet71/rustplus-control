@@ -6,6 +6,12 @@ export function createSystemRouter(control: RustplusControlService): Router {
 
   router.get('/auth/verify', (_request, response) => response.json({ authenticated: true }));
   router.get('/state', (_request, response) => response.json(control.getState()));
+  router.get('/map', (_request, response) => {
+    const map = control.getMap();
+    return map
+      ? response.json(map)
+      : response.status(409).json({ error: 'Map is not available yet.' });
+  });
 
   router.get('/events', (request, response) => {
     response.writeHead(200, {
