@@ -1,0 +1,81 @@
+.rust-map {
+  min-height: 280px;
+  overflow: hidden;
+  border: 1px solid #46524e;
+  background: #101513;
+}
+.map-canvas {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+}
+.rust-map img {
+  position: absolute;
+  display: block;
+  max-width: none;
+}
+.map-grid-layer,
+.map-marker-layer {
+  position: absolute;
+  inset: 0;
+}
+.map-grid-layer {
+  display: grid;
+  pointer-events: none;
+}
+.map-grid-cell {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  place-items: start end;
+  border-right: 1px solid rgba(225, 237, 231, 0.28);
+  border-bottom: 1px solid rgba(225, 237, 231, 0.28);
+  padding: 3px;
+  color: rgba(241, 247, 243, 0.82);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 0 1px 2px #000;
+}
+.map-marker {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  border: 2px solid #12201a;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  cursor: default;
+}
+.map-marker.team {
+  background: #5cc486;
+  box-shadow: 0 0 0 3px rgba(92, 196, 134, 0.2);
+}
+.map-marker.server {
+  background: #f3c96a;
+}
+.map-marker.event {
+  background: #e06c75;
+}
+.map-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  color: #9aa9a3;
+  font-size: 13px;
+}
+.map-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.map-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.map-dot-team {
+  background: #5cc486;
+}
+.map-dot-marker {
+  background: #f3c96a;
+}

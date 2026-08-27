@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { deviceBackupInput, groupInput, settingsInput } = require('../dist/validation');
+const { deviceBackupInput, groupInput, settingsInput } = require('../dist/backend/validation');
 
 test('settingsInput accepts complete server and FCM settings', () => {
   const result = settingsInput({

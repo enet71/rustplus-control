@@ -1,0 +1,135 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, system-ui, sans-serif;
+  background: #121719;
+  color: #edf2ef;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+h1 {
+  font-size: 32px;
+  margin-top: 6px;
+}
+h2 {
+  font-size: 17px;
+}
+h3 {
+  font-size: 15px;
+}
+.eyebrow {
+  font-size: 12px;
+  color: #91a79c;
+  letter-spacing: 1.2px;
+}
+.hint {
+  color: #9aa9a3;
+  font-size: 14px;
+  margin: 7px 0 12px;
+}
+/* Declared after `.hint` so the feedback line keeps its own spacing and reserves
+   room while empty, which stops the layout from jumping when a message appears. */
+.feedback {
+  color: #9aa9a3;
+  font-size: 14px;
+  margin-top: 6px;
+  min-height: 18px;
+}
+label {
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+  color: #b9c7c0;
+}
+input {
+  border: 1px solid #46524e;
+  background: #111715;
+  color: #eef4f0;
+  border-radius: 4px;
+  padding: 10px;
+  font: inherit;
+}
+button {
+  border: 0;
+  border-radius: 5px;
+  background: #4e8f68;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+.secondary {
+  padding: 7px 10px;
+  background: #384541;
+  font-size: 12px;
+}
+.danger {
+  background: #643f42;
+}
+.row-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.notification-actions {
+  display: flex;
+  gap: 8px;
+}
+.toggle-switch {
+  width: 44px;
+  height: 24px;
+  padding: 3px;
+  border-radius: 12px;
+  background: #a6575c;
+}
+.toggle-switch span {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 120ms ease;
+}
+.toggle-switch.is-on {
+  background: #41a86b;
+}
+.toggle-switch.is-on span {
+  transform: translateX(20px);
+}
+.sort-button,
+.collapse-group {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: #384541;
+  font-size: 16px;
+}
+.collapse-group {
+  display: grid;
+  place-items: center;
+}
+.collapse-icon {
+  width: 9px;
+  height: 9px;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 120ms ease;
+}
+.collapse-group.is-collapsed .collapse-icon {
+  transform: translateX(-2px) rotate(-45deg);
+}
+.toggle-switch:disabled,
+.sort-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

@@ -2,6 +2,46 @@
 
 Use this file for confirmed, project-specific lessons. Add entries in reverse chronological order.
 
+## 2026-08-28 - Retry map loading on a Rust+ rate limit, like device state loading does
+
+**Context:** `loadMap` in `backend/services/rustplus-control-service.ts`, called once from `startPollingListeners` on connect.
+
+**What went wrong:** `getInfo`/`getMap` callbacks only checked `message.response?.error` generically and returned, leaving `this.map` `null` forever when Rust+ answered with a `rate_limit` error. Since `loadMap` was never retried, `GET /api/map` kept answering `409` indefinitely even though the frontend polls it (see the sibling 2026-08-28 lesson on `409` handling) expecting the server to eventually succeed.
+
+**Required behavior:** Detect `rate_limit` in the Rust+ response error (same check `loadDeviceStates` already used) and reschedule `loadMap` after a delay instead of giving up, tracking the retry timer so `clearMapState`/reconnect can cancel it.
+
+**Evidence:** User reported the map never loads when a rate limit error occurs; `loadMap` had no retry path at all while `loadDeviceStates` already implemented one for the same class of error.
+
+## 2026-08-28 - Do not add typescript-eslint to this repository
+
+**Context:** Adding a linter that reports React hook dependency problems in `frontend/src`.
+
+**What went wrong:** `typescript-eslint` was installed and configured, but it refuses to load on this project's TypeScript version, so the linter could not run at all.
+
+**Required behavior:** Lint this repository with `oxlint` (`npm run lint`, configured in `.oxlintrc.json`). Do not reintroduce `typescript-eslint` while the project stays on TypeScript 7; its released versions cap support at `<6.1.0`.
+
+**Evidence:** `npm install` failed with a peer conflict against `typescript@7.0.2`, and after forcing the install, `npx eslint` aborted with `Error: typescript-eslint does not support TS 7.0.` (tracked in typescript-eslint issue #10940).
+
+## 2026-08-28 - Treat GET /api/map 409 as not-ready, not an error
+
+**Context:** Rendering the Rust+ map in `frontend/src/features/map`.
+
+**What went wrong:** The map view showed a hard failure message for any non-OK response. Because the query client does not retry, a freshly connected server left the map permanently blank.
+
+**Required behavior:** `GET /api/map` answers `409` with `Map is not available yet.` until the server has received the map. Keep polling on `409` and only report a failure for other statuses.
+
+**Evidence:** Running the app against a live server returned `GET /api/map [409]`; the Map tab rendered "Map could not be loaded." and never recovered until polling on `409` was added.
+
+## 2026-08-28 - Verify a piped npm command actually succeeded
+
+**Context:** Installing dev dependencies through the Bash tool with output piped to `tail`.
+
+**What went wrong:** `npm install ... | tail` reported exit code 0 because the exit status came from `tail`, and the failed install was reported to the user as successful.
+
+**Required behavior:** Confirm an install by checking the result rather than the piped exit code, for example by listing the expected directory under `node_modules` or reading the package's entry in `package.json`.
+
+**Evidence:** The background task reported "exit code 0" while the captured output contained `npm error ... Could not resolve dependency`, and none of the requested packages were present in `node_modules`.
+
 ## 2026-08-27 - Tolerate incomplete AppInfo responses
 
 **Context:** Loading Rust+ map metadata through `getInfo`.

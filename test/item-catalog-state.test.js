@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { RustplusControlService } = require('../dist/services/rustplus-control-service');
+const { RustplusControlService } = require('../dist/backend/services/rustplus-control-service');
 
 test('Rust+ protobuf patch makes AppInfo queuedPlayers optional', () => {
   const proto = fs.readFileSync(
@@ -229,6 +229,70 @@ test('Rust+ map image is exposed with its coordinate metadata', () => {
     mapSize: 4000,
     image: 'data:image/jpeg;base64,bWFwLWltYWdl',
   });
+});
+
+test('map loading retries after a Rust+ rate limit instead of giving up', () => {
+  const repository = {
+    migrateLegacyFcmConfig() {},
+    loadConfig() {
+      return { activeServerId: 'server', servers: [] };
+    },
+    hasFcmConfig() {
+      return false;
+    },
+  };
+  const control = new RustplusControlService(repository, process.cwd(), false);
+  const timers = [];
+  const setTimeoutOriginal = global.setTimeout;
+  global.setTimeout = (callback, delay) => {
+    timers.push({ callback, delay });
+    return {};
+  };
+  let getInfoCalls = 0;
+  const client = {
+    getInfo(callback) {
+      getInfoCalls += 1;
+      if (getInfoCalls === 1) {
+        callback({ response: { error: { error: 'rate_limit' } } });
+      } else {
+        callback({ response: { info: { mapSize: 4000 } } });
+      }
+    },
+    getMap(callback) {
+      callback({
+        response: {
+          map: {
+            width: 4500,
+            height: 4500,
+            oceanMargin: 100,
+            jpgImage: Buffer.from('map-image'),
+          },
+        },
+      });
+    },
+  };
+  control.client = client;
+
+  try {
+    control.loadMap(client);
+
+    assert.equal(getInfoCalls, 1);
+    assert.equal(control.getMap(), null);
+    assert.equal(timers[0].delay, 5000);
+
+    timers[0].callback();
+
+    assert.equal(getInfoCalls, 2);
+    assert.deepEqual(control.getMap(), {
+      width: 4500,
+      height: 4500,
+      oceanMargin: 100,
+      mapSize: 4000,
+      image: 'data:image/jpeg;base64,bWFwLWltYWdl',
+    });
+  } finally {
+    global.setTimeout = setTimeoutOriginal;
+  }
 });
 
 test('polling listeners start before the device state queue', () => {

@@ -5,13 +5,18 @@
   "main": "server.js",
   "scripts": {
     "postinstall": "node scripts/patch-rustplus-proto.js",
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.js\" \"*.{js,json,cjs}\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.js\" \"*.{js,json,cjs}\"",
+    "build": "npm run build:backend && tsc -p tsconfig.client.json && vite build --config frontend/vite.config.mts",
+    "build:backend": "tsc -p tsconfig.json",
+    "dev:backend": "npm run build:backend && node scripts/start-with-test-key.js",
+    "dev:frontend": "vite --config frontend/vite.config.mts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json",
+    "lint": "oxlint backend frontend/src",
+    "test:frontend": "vitest run --config frontend/vitest.config.mts",
+    "format": "prettier --write \"backend/**/*.ts\" \"frontend/src/**/*.{ts,tsx,css}\" frontend/index.html \"frontend/*.mts\" \"test/**/*.js\" \"*.{js,mjs,json,cjs}\"",
+    "format:check": "prettier --check \"backend/**/*.ts\" \"frontend/src/**/*.{ts,tsx,css}\" frontend/index.html \"frontend/*.mts\" \"test/**/*.js\" \"*.{js,mjs,json,cjs}\"",
     "start": "npm run build && node server.js",
     "start:test": "npm run build && node scripts/start-with-test-key.js",
-    "test": "npm run format:check && npm run build && node --test"
+    "test": "npm run format:check && npm run lint && npm run build && npm run test:frontend && node --test test/*.test.js"
   },
   "keywords": [],
   "author": "",
@@ -19,11 +24,25 @@
   "type": "commonjs",
   "dependencies": {
     "@liamcottle/rustplus.js": "^2.5.0",
-    "express": "^5.2.1"
+    "@tanstack/react-query": "^5.102.8",
+    "express": "^5.2.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.6",
     "@types/express": "^5.0.6",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^29.1.1",
+    "oxlint": "^1.80.0",
     "prettier": "^3.9.6",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   }
 }

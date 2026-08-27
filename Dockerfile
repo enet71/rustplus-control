@@ -7,9 +7,9 @@ COPY scripts ./scripts
 RUN npm ci
 RUN node scripts/patch-rustplus-proto.js
 
-COPY server.js tsconfig.json ./
-COPY src ./src
-COPY public ./public
+COPY server.js tsconfig.json tsconfig.client.json ./
+COPY backend ./backend
+COPY frontend ./frontend
 RUN npm run build
 
 FROM node:22-bookworm-slim
@@ -22,7 +22,7 @@ RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
 COPY server.js ./
-COPY public ./public
+COPY --from=build /app/frontend/dist ./frontend/dist
 
 RUN mkdir /app/data && chown node:node /app/data
 
