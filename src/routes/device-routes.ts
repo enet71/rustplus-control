@@ -18,15 +18,17 @@ export function createDeviceRouter(control: RustplusControlService): Router {
     return response.json({ ok: true });
   });
 
-  router.post('/devices/:entityId', (request, response) => {
+  router.post('/devices/:entityId', async (request, response) => {
     const enabled = request.body?.enabled;
     if (typeof enabled !== 'boolean')
       return response.status(400).json({ error: 'enabled must be boolean.' });
-    const result = control.setDeviceValue(String(request.params.entityId), enabled);
+    const result = await control.setDeviceValue(String(request.params.entityId), enabled);
     if (result === 'not-connected')
       return response.status(409).json({ error: 'Rust+ is not connected.' });
     if (result === 'unknown') return response.status(404).json({ error: 'Unknown switch.' });
-    return response.status(202).json({ ok: true });
+    if (result === 'failed')
+      return response.status(502).json({ error: 'Rust+ rejected the command.' });
+    return response.json({ ok: true });
   });
   router.patch('/devices/:entityId', (request, response) => {
     const name = String(request.body?.name || '').trim();
@@ -64,17 +66,19 @@ export function createDeviceRouter(control: RustplusControlService): Router {
       ? response.status(204).end()
       : response.status(404).json({ error: 'Unknown group.' });
   });
-  router.post('/groups/:id/switch', (request, response) => {
+  router.post('/groups/:id/switch', async (request, response) => {
     const enabled = request.body?.enabled;
     if (typeof enabled !== 'boolean')
       return response.status(400).json({ error: 'enabled must be boolean.' });
-    const result = control.setGroupValue(request.params.id, enabled);
+    const result = await control.setGroupValue(request.params.id, enabled);
     if (result === 'not-connected')
       return response.status(409).json({ error: 'Rust+ is not connected.' });
     if (result === 'unknown') return response.status(404).json({ error: 'Unknown group.' });
     if (result === 'no-switches')
       return response.status(409).json({ error: 'This group does not contain a switch.' });
-    return response.status(202).json({ ok: true });
+    if (result === 'failed')
+      return response.status(502).json({ error: 'Rust+ rejected one or more group commands.' });
+    return response.json({ ok: true });
   });
 
   router.post('/items/:type/:id/move', (request, response) => {

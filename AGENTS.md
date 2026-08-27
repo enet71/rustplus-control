@@ -7,6 +7,14 @@
 - `public/` contains the static browser UI. Keep browser code framework-free and compatible with the existing plain JavaScript/CSS structure.
 - `scripts/` contains supporting Node scripts, including the FCM listener and the post-install package patch.
 
+## Skills
+
+Before acting on a task, identify the applicable skills in `.agents/skills/` and load their `SKILL.md` files completely.
+
+- Always invoke `project-learning` for implementation, investigation, review, or configuration changes in this repository. Read its lessons log before changing code and record only confirmed new lessons through that skill.
+- Invoke `code-best-practices` for non-trivial code changes and code reviews. Follow it to define observable behavior, preserve clear state ownership, validate boundaries, handle failures explicitly, and verify changed behavior with focused tests.
+- When a task explicitly names another available skill or clearly matches its description, invoke that skill as well. More specific project or domain skills take precedence over general guidance.
+
 ## Commands
 
 - Install dependencies: `npm install`
@@ -17,7 +25,7 @@ The server binds to `127.0.0.1` and uses port `3010` by default. Change the port
 
 ## Change guidelines
 
-- Before working in this repository, read `.agents/skills/project-learning/references/lessons.md` and follow applicable confirmed lessons. Record a new lesson only through the `project-learning` skill when a mistake is confirmed.
+- Before working in this repository, apply the requirements in the Skills section.
 - Preserve the CommonJS module style and the existing direct Express route definitions unless a change genuinely requires a larger refactor.
 - Keep Rust+ and FCM process lifecycle state in `server.js`; do not expose child-process control directly to the browser.
 - Keep API error responses JSON and validate all request data before persisting it or passing it to Rust+.

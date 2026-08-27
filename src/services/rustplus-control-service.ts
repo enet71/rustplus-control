@@ -1,4 +1,4 @@
-import crypto from 'node:crypto';
+﻿import crypto from 'node:crypto';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { Response } from 'express';
@@ -22,6 +22,14 @@ const RustPlus: any = require('@liamcottle/rustplus.js');
 const RECONNECT_DELAY_MS = 5000;
 const DEVICE_STATE_REQUEST_DELAY_MS = 200;
 const STORAGE_POLLING_INTERVAL_MS = 5000;
+const TEAM_CHAT_POLLING_INTERVAL_MS = 3000;
+const TEAM_CHAT_REQUEST_TIMEOUT_MS = 10000;
+const TEAM_CHAT_SEEN_LIMIT = 500;
+const TEAM_CHAT_MESSAGE_PREFIX = '[rust-control]';
+
+type SwitchCommandResult = 'not-connected' | 'unknown' | 'no-switches' | 'failed' | null;
+type TeamChatRequest = { rustplus: any; timeout: NodeJS.Timeout | null };
+type ChatTarget = { name: string; switchIds: string[]; isGroup: boolean };
 
 function errorSummary(error: unknown): string {
   const value = error as { name?: unknown; message?: unknown } | null;
@@ -49,6 +57,7 @@ export class RustplusControlService {
   private readonly eventClients = new Set<Response>();
   private markerPolling: NodeJS.Timeout | null = null;
   private teamPolling: NodeJS.Timeout | null = null;
+  private teamChatPolling: NodeJS.Timeout | null = null;
   private storagePolling: NodeJS.Timeout | null = null;
   private deviceStateLoadingTimer: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
@@ -56,6 +65,8 @@ export class RustplusControlService {
   private fcmListenerProcess: ChildProcess | null = null;
   private fcmStatus: FcmStatus;
   private readonly pendingPairings = new Map<string, PendingPairing>();
+  private readonly processedTeamChatMessages = new Set<string>();
+  private teamChatRequest: TeamChatRequest | null = null;
 
   constructor(
     private readonly repository: ConfigRepository,
@@ -151,6 +162,9 @@ export class RustplusControlService {
     this.cancelReconnect();
     this.stopDeviceStateLoading();
     this.stopStoragePolling();
+    this.stopMarkerPolling();
+    this.stopTeamPolling();
+    this.stopTeamChatPolling();
     this.fcmRegisterProcess?.kill();
     this.fcmListenerProcess?.kill();
     this.fcmRegisterProcess = null;
@@ -236,7 +250,7 @@ export class RustplusControlService {
     this.connect();
   }
 
-  setDeviceValue(entityId: string, enabled: boolean): 'not-connected' | 'unknown' | null {
+  async setDeviceValue(entityId: string, enabled: boolean): Promise<SwitchCommandResult> {
     if (!this.client || !this.status.connected) return 'not-connected';
     if (
       !(this.activeProfile()?.devices || []).some(
@@ -244,9 +258,10 @@ export class RustplusControlService {
       )
     )
       return 'unknown';
-    this.client.setEntityValue(entityId, enabled, (message: any) => {
-      if (!message.response?.error) this.publishEntityState(entityId, enabled);
-    });
+    const rustplus = this.client;
+    if (!(await this.setRustEntityValue(rustplus, entityId, enabled))) return 'failed';
+    if (this.client !== rustplus) return 'not-connected';
+    this.publishEntityState(entityId, enabled);
     return null;
   }
 
@@ -317,7 +332,7 @@ export class RustplusControlService {
     return true;
   }
 
-  setGroupValue(id: string, enabled: boolean): 'not-connected' | 'unknown' | 'no-switches' | null {
+  async setGroupValue(id: string, enabled: boolean): Promise<SwitchCommandResult> {
     if (!this.client || !this.status.connected) return 'not-connected';
     const profile = this.activeProfile();
     const group = profile?.groups.find((item) => item.id === id);
@@ -326,10 +341,17 @@ export class RustplusControlService {
       profile?.devices.some((device) => device.entityId === entityId && device.type === 'switch'),
     );
     if (!switchIds.length) return 'no-switches';
-    for (const entityId of switchIds)
-      this.client.setEntityValue(entityId, enabled, (message: any) => {
-        if (!message.response?.error) this.publishEntityState(entityId, enabled);
-      });
+    const rustplus = this.client;
+    const results = await Promise.all(
+      switchIds.map(async (entityId) => ({
+        entityId,
+        succeeded: await this.setRustEntityValue(rustplus, entityId, enabled),
+      })),
+    );
+    if (this.client !== rustplus) return 'not-connected';
+    for (const result of results)
+      if (result.succeeded) this.publishEntityState(result.entityId, enabled);
+    if (results.some((result) => !result.succeeded)) return 'failed';
     return null;
   }
 
@@ -349,10 +371,12 @@ export class RustplusControlService {
   private activeProfile(): ServerProfile | null {
     return this.config.servers.find((server) => server.id === this.config.activeServerId) || null;
   }
+
   private saveConfig(config: AppConfig): void {
     this.repository.saveConfig(config);
     this.config = config;
   }
+
   private setActiveProfile(profile: ServerProfile): void {
     this.saveConfig({
       ...this.config,
@@ -360,6 +384,7 @@ export class RustplusControlService {
       servers: this.config.servers.map((item) => (item.id === profile.id ? profile : item)),
     });
   }
+
   private publicConfig(): Record<string, unknown> {
     const profile = this.activeProfile();
     const { playerToken: _playerToken, ...server } =
@@ -381,6 +406,7 @@ export class RustplusControlService {
       })),
     };
   }
+
   private publicStorageStates(): Record<string, StorageState> {
     return Object.fromEntries(
       Object.entries(this.storageStates).map(([entityId, storage]) => [
@@ -395,6 +421,7 @@ export class RustplusControlService {
       ]),
     );
   }
+
   private reconcileGroups(groups: DeviceGroup[], devices: Device[]): DeviceGroup[] {
     const deviceIds = new Set(devices.map((device) => device.entityId));
     return groups
@@ -404,10 +431,12 @@ export class RustplusControlService {
       }))
       .filter((group) => group.deviceIds.length > 0);
   }
+
   private sortOrder(item: { sortOrder?: number }, fallback: number): number {
     const value = Number(item.sortOrder);
     return Number.isFinite(value) ? value : fallback;
   }
+
   private nextSortOrder(profile: ServerProfile): number {
     return (
       Math.max(
@@ -418,6 +447,7 @@ export class RustplusControlService {
       ) + 1
     );
   }
+
   private moveProfileItem(
     profile: ServerProfile,
     type: 'group' | 'device',
@@ -470,9 +500,11 @@ export class RustplusControlService {
       ),
     };
   }
+
   private publishEntityState(entityId: string, value: boolean): void {
     this.deviceStates[String(entityId)] = Boolean(value);
   }
+
   private publishStorageState(
     entityId: string,
     payload: { capacity?: unknown; items?: unknown },
@@ -491,6 +523,7 @@ export class RustplusControlService {
       items,
     };
   }
+
   private refreshStorageState(rustplus: any, entityId: string): void {
     try {
       rustplus.getEntityInfo(String(entityId), (message: any) => {
@@ -503,8 +536,8 @@ export class RustplusControlService {
       logRust(`storage state refresh failed: ${errorSummary(error)}`);
     }
   }
+
   private handleEntityChanged(rustplus: any, message: any): void {
-    console.log(rustplus, message);
     const changed = message.broadcast?.entityChanged;
     const payload = changed?.payload;
     if (!changed || !payload) return;
@@ -530,10 +563,12 @@ export class RustplusControlService {
       void this.sendDiscordAlarm(this.activeProfile(), device);
     }
   }
+
   private publishEvent(event: RustEvent): void {
     const payload = `event: rust-event\ndata: ${JSON.stringify(event)}\n\n`;
     for (const response of this.eventClients) response.write(payload);
   }
+
   private addPairedDevice(pairing: PendingPairing): void {
     const profile = this.config.servers.find((item) => item.id === pairing.serverId);
     if (profile && !profile.devices.some((device) => device.entityId === pairing.entityId))
@@ -557,6 +592,7 @@ export class RustplusControlService {
         ),
       });
   }
+
   private handlePairing(data: any): void {
     const bodyValue = data.appData?.find((item: any) => item.key === 'body')?.value;
     if (!bodyValue) return;
@@ -624,6 +660,7 @@ export class RustplusControlService {
       });
     }
   }
+
   private startFcmListener(): void {
     if (this.fcmListenerProcess) return;
     const listener = spawn(
@@ -669,6 +706,7 @@ export class RustplusControlService {
       };
     });
   }
+
   private restartFcmListener(): void {
     const previous = this.fcmListenerProcess;
     if (!previous) {
@@ -680,6 +718,7 @@ export class RustplusControlService {
     previous.once('close', () => this.startFcmListener());
     if (!previous.kill()) this.startFcmListener();
   }
+
   private startFcmRegister(): void {
     if (this.repository.hasFcmConfig()) {
       this.fcmStatus = {
@@ -727,8 +766,9 @@ export class RustplusControlService {
         };
     });
   }
+
   private startMarkerPolling(): void {
-    if (this.markerPolling) clearInterval(this.markerPolling);
+    this.stopMarkerPolling();
     this.markerSnapshots = new Map();
     const poll = () => {
       if (!this.client || !this.status.connected) return;
@@ -778,8 +818,14 @@ export class RustplusControlService {
     poll();
     this.markerPolling = setInterval(poll, 10000);
   }
+
+  private stopMarkerPolling(): void {
+    if (this.markerPolling) clearInterval(this.markerPolling);
+    this.markerPolling = null;
+  }
+
   private startTeamPolling(): void {
-    if (this.teamPolling) clearInterval(this.teamPolling);
+    this.stopTeamPolling();
     this.teamDeaths = new Map();
     const poll = () => {
       if (!this.client || !this.status.connected) return;
@@ -809,6 +855,207 @@ export class RustplusControlService {
     poll();
     this.teamPolling = setInterval(poll, 10000);
   }
+
+  private stopTeamPolling(): void {
+    if (this.teamPolling) clearInterval(this.teamPolling);
+    this.teamPolling = null;
+  }
+
+  private startTeamChatPolling(rustplus: any): void {
+    this.stopTeamChatPolling();
+    const poll = () => {
+      if (this.client !== rustplus || !this.status.connected || this.teamChatRequest) return;
+      const request: TeamChatRequest = { rustplus, timeout: null };
+      this.teamChatRequest = request;
+      request.timeout = setTimeout(() => {
+        if (!this.finishTeamChatRequest(request)) return;
+        logRust('team chat poll timed out');
+      }, TEAM_CHAT_REQUEST_TIMEOUT_MS);
+      try {
+        rustplus.sendRequest({ getTeamChat: {} }, (message: any) => {
+          if (!this.finishTeamChatRequest(request)) return true;
+          if (this.client !== rustplus || message.response?.error) return true;
+          const messages = message.response?.teamChat?.messages;
+          if (!Array.isArray(messages)) return true;
+          for (const teamMessage of messages) this.handleTeamChatMessage(rustplus, teamMessage);
+          return true;
+        });
+      } catch (error) {
+        this.finishTeamChatRequest(request);
+        logRust(`team chat poll failed: ${errorSummary(error)}`);
+      }
+    };
+    poll();
+    this.teamChatPolling = setInterval(poll, TEAM_CHAT_POLLING_INTERVAL_MS);
+  }
+
+  private stopTeamChatPolling(): void {
+    if (this.teamChatPolling) clearInterval(this.teamChatPolling);
+    this.teamChatPolling = null;
+    if (this.teamChatRequest?.timeout) clearTimeout(this.teamChatRequest.timeout);
+    this.teamChatRequest = null;
+  }
+
+  private finishTeamChatRequest(request: TeamChatRequest): boolean {
+    if (this.teamChatRequest !== request) return false;
+    if (request.timeout) clearTimeout(request.timeout);
+    this.teamChatRequest = null;
+    return true;
+  }
+
+  private handleTeamChatMessage(rustplus: any, teamMessage: any): void {
+    const text = typeof teamMessage?.message === 'string' ? teamMessage.message : '';
+    const messageId = [teamMessage?.steamId, teamMessage?.time, text].join(':');
+    if (!text.startsWith('!') || this.processedTeamChatMessages.has(messageId)) return;
+    this.processedTeamChatMessages.add(messageId);
+    if (this.processedTeamChatMessages.size > TEAM_CHAT_SEEN_LIMIT)
+      this.processedTeamChatMessages.delete(this.processedTeamChatMessages.values().next().value!);
+
+    const command = text.slice(1).trim();
+    const action = command.endsWith('+') ? true : command.endsWith('-') ? false : null;
+    const targetName = (action === null ? command : command.slice(0, -1)).trim();
+    if (!targetName) return;
+    const targets = this.findChatTargets(targetName);
+    if (!targets.length) {
+      this.sendTeamChatMessage(rustplus, `Switch or group not found: ${targetName}.`);
+      return;
+    }
+    if (targets.length > 1) {
+      this.sendTeamChatMessage(
+        rustplus,
+        `Multiple switches or groups have the name: ${targetName}.`,
+      );
+      return;
+    }
+    if (action === null) void this.sendChatTargetState(rustplus, targets[0]);
+    else void this.setChatTargetValue(rustplus, targets[0], action);
+  }
+
+  private findChatTargets(name: string): ChatTarget[] {
+    const profile = this.activeProfile();
+    const normalizedName = name.toLocaleLowerCase();
+    if (!profile) return [];
+    const switches = profile.devices.filter(
+      (device) => device.type === 'switch' && device.name.toLocaleLowerCase() === normalizedName,
+    );
+    const groups = profile.groups
+      .filter((group) => group.name.toLocaleLowerCase() === normalizedName)
+      .map((group) => ({
+        name: group.name,
+        switchIds: group.deviceIds.filter((entityId) =>
+          profile.devices.some(
+            (device) => device.entityId === entityId && device.type === 'switch',
+          ),
+        ),
+        isGroup: true,
+      }))
+      .filter((group) => group.switchIds.length);
+    return [
+      ...switches.map((device) => ({
+        name: device.name,
+        switchIds: [device.entityId],
+        isGroup: false,
+      })),
+      ...groups,
+    ];
+  }
+
+  private async sendChatTargetState(rustplus: any, target: ChatTarget): Promise<void> {
+    const targetLabel = this.chatTargetLabel(target);
+    const results = await Promise.all(
+      target.switchIds.map(async (entityId) => ({
+        entityId,
+        value: await this.getRustEntityValue(rustplus, entityId),
+      })),
+    );
+    if (this.client !== rustplus) return;
+    const failedIds = results
+      .filter((result) => result.value === null)
+      .map((result) => result.entityId);
+    if (failedIds.length) {
+      this.sendTeamChatMessage(
+        rustplus,
+        `Unable to get state: ${targetLabel} (failed: ${failedIds.join(', ')}).`,
+      );
+      return;
+    }
+    for (const result of results) this.publishEntityState(result.entityId, result.value!);
+    this.sendTeamChatMessage(
+      rustplus,
+      `${targetLabel}: ${results.every((result) => result.value) ? 'on' : 'off'}.`,
+    );
+  }
+
+  private async setChatTargetValue(
+    rustplus: any,
+    target: ChatTarget,
+    enabled: boolean,
+  ): Promise<void> {
+    const targetLabel = this.chatTargetLabel(target);
+    const results = await Promise.all(
+      target.switchIds.map(async (entityId) => ({
+        entityId,
+        succeeded: await this.setRustEntityValue(rustplus, entityId, enabled),
+      })),
+    );
+    if (this.client !== rustplus) return;
+    for (const result of results)
+      if (result.succeeded) this.publishEntityState(result.entityId, enabled);
+    const failedIds = results
+      .filter((result) => !result.succeeded)
+      .map((result) => result.entityId);
+    if (failedIds.length) {
+      this.sendTeamChatMessage(
+        rustplus,
+        `${targetLabel}: ${results.length - failedIds.length}/${results.length} switches changed; failed: ${failedIds.join(', ')}.`,
+      );
+      return;
+    }
+    this.sendTeamChatMessage(rustplus, `${targetLabel}: ${enabled ? 'on' : 'off'}.`);
+  }
+
+  private chatTargetLabel(target: ChatTarget): string {
+    return target.isGroup ? `Group ${target.name}` : target.name;
+  }
+
+  private setRustEntityValue(rustplus: any, entityId: string, enabled: boolean): Promise<boolean> {
+    return new Promise((resolve) => {
+      try {
+        rustplus.setEntityValue(entityId, enabled, (message: any) => {
+          resolve(!message.response?.error);
+          return true;
+        });
+      } catch (error) {
+        logRust(`switch command failed: ${errorSummary(error)}`);
+        resolve(false);
+      }
+    });
+  }
+
+  private getRustEntityValue(rustplus: any, entityId: string): Promise<boolean | null> {
+    return new Promise((resolve) => {
+      try {
+        rustplus.getEntityInfo(entityId, (message: any) => {
+          const value = message.response?.entityInfo?.payload?.value;
+          resolve(message.response?.error || typeof value !== 'boolean' ? null : value);
+          return true;
+        });
+      } catch (error) {
+        logRust(`team chat state request failed: ${errorSummary(error)}`);
+        resolve(null);
+      }
+    });
+  }
+
+  private sendTeamChatMessage(rustplus: any, message: string): void {
+    if (this.client !== rustplus || !this.status.connected) return;
+    try {
+      rustplus.sendTeamMessage(`${TEAM_CHAT_MESSAGE_PREFIX} ${message}`);
+    } catch (error) {
+      logRust(`team chat reply failed: ${errorSummary(error)}`);
+    }
+  }
+
   private startStoragePolling(rustplus: any, devices: Device[]): void {
     this.stopStoragePolling();
     const storageDevices = devices.filter((device) => device.type === 'storage');
@@ -820,19 +1067,23 @@ export class RustplusControlService {
     poll();
     this.storagePolling = setInterval(poll, STORAGE_POLLING_INTERVAL_MS);
   }
+
   private stopStoragePolling(): void {
     if (this.storagePolling) clearInterval(this.storagePolling);
     this.storagePolling = null;
   }
+
   private cancelReconnect(): void {
     if (!this.reconnectTimer) return;
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
   }
+
   private stopDeviceStateLoading(): void {
     if (this.deviceStateLoadingTimer) clearTimeout(this.deviceStateLoadingTimer);
     this.deviceStateLoadingTimer = null;
   }
+
   private loadDeviceStates(rustplus: any, devices: Device[]): void {
     this.stopDeviceStateLoading();
     const pending = [...devices];
@@ -868,6 +1119,7 @@ export class RustplusControlService {
     };
     requestNext();
   }
+
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return;
     const server = this.activeProfile()?.server;
@@ -882,10 +1134,14 @@ export class RustplusControlService {
       this.connect();
     }, RECONNECT_DELAY_MS);
   }
+
   private connect(): void {
     this.cancelReconnect();
     this.stopDeviceStateLoading();
     this.stopStoragePolling();
+    this.stopMarkerPolling();
+    this.stopTeamPolling();
+    this.stopTeamChatPolling();
     if (this.client) {
       const previous = this.client;
       this.client = null;
@@ -919,6 +1175,7 @@ export class RustplusControlService {
       this.startStoragePolling(rustplus, profile.devices);
       this.startMarkerPolling();
       this.startTeamPolling();
+      this.startTeamChatPolling(rustplus);
     });
     rustplus.on('connecting', () => {
       if (this.client === rustplus) this.status = { connected: false, message: 'Connecting...' };
@@ -928,8 +1185,9 @@ export class RustplusControlService {
       logRust(`disconnected; retrying in ${RECONNECT_DELAY_MS / 1000}s`);
       this.stopDeviceStateLoading();
       this.stopStoragePolling();
-      if (this.markerPolling) clearInterval(this.markerPolling);
-      if (this.teamPolling) clearInterval(this.teamPolling);
+      this.stopMarkerPolling();
+      this.stopTeamPolling();
+      this.stopTeamChatPolling();
       this.scheduleReconnect();
     });
     rustplus.on('error', (error: Error) => {
@@ -937,6 +1195,9 @@ export class RustplusControlService {
       logRust(`socket error: ${errorSummary(error)}`);
       this.status = { connected: false, message: `Connection error: ${error.message}` };
       this.stopStoragePolling();
+      this.stopMarkerPolling();
+      this.stopTeamPolling();
+      this.stopTeamChatPolling();
       this.scheduleReconnect();
     });
     rustplus.on('message', (message: any) => {
@@ -945,6 +1206,7 @@ export class RustplusControlService {
     });
     rustplus.connect();
   }
+
   private async sendDiscordAlarm(profile: ServerProfile | null, device: Device): Promise<void> {
     const url = profile?.discordWebhookUrl;
     if (!url) return;

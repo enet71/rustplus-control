@@ -42,10 +42,10 @@ function createControl() {
   return { control, commands };
 }
 
-test('group switch sends commands only to switch devices', () => {
+test('group switch sends commands only to switch devices', async () => {
   const { control, commands } = createControl();
 
-  assert.equal(control.setGroupValue('mixed', true), null);
+  assert.equal(await control.setGroupValue('mixed', true), null);
   assert.deepEqual(commands, [['switch', true]]);
-  assert.equal(control.setGroupValue('alarms', true), 'no-switches');
+  assert.equal(await control.setGroupValue('alarms', true), 'no-switches');
 });
