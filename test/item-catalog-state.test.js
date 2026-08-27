@@ -136,3 +136,46 @@ test('storage monitors are polled when broadcasts are absent', () => {
   assert.equal(control.getState().storageStates.storage.items[0].quantity, 8);
   control.stopStoragePolling();
 });
+
+test('device state loading retries the same device after a Rust+ rate limit', () => {
+  const repository = {
+    migrateLegacyFcmConfig() {},
+    loadConfig() {
+      return { activeServerId: 'server', servers: [] };
+    },
+    hasFcmConfig() {
+      return false;
+    },
+  };
+  const control = new RustplusControlService(repository, process.cwd(), false);
+  const callbacks = [];
+  const requestedIds = [];
+  const timers = [];
+  const setTimeoutOriginal = global.setTimeout;
+  const client = {
+    getEntityInfo(entityId, callback) {
+      requestedIds.push(entityId);
+      callbacks.push(callback);
+    },
+  };
+  global.setTimeout = (callback, delay) => {
+    timers.push({ callback, delay });
+    return {};
+  };
+  control.client = client;
+  control.status = { connected: true, message: 'Connected' };
+
+  try {
+    control.loadDeviceStates(client, [{ entityId: 'switch', name: 'Switch', type: 'switch' }]);
+    callbacks[0]({ response: { error: { error: 'rate_limit' } } });
+
+    assert.deepEqual(requestedIds, ['switch']);
+    assert.equal(timers[0].delay, 5000);
+
+    timers[0].callback();
+    assert.deepEqual(requestedIds, ['switch', 'switch']);
+  } finally {
+    control.stopDeviceStateLoading();
+    global.setTimeout = setTimeoutOriginal;
+  }
+});

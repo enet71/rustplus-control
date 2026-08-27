@@ -20,7 +20,8 @@ import { RustItemCatalog } from './rust-item-catalog';
 
 const RustPlus: any = require('@liamcottle/rustplus.js');
 const RECONNECT_DELAY_MS = 5000;
-const DEVICE_STATE_REQUEST_DELAY_MS = 200;
+const DEVICE_STATE_REQUEST_DELAY_MS = 1000;
+const DEVICE_STATE_RATE_LIMIT_RETRY_MS = 5000;
 const STORAGE_POLLING_INTERVAL_MS = 5000;
 const TEAM_CHAT_POLLING_INTERVAL_MS = 3000;
 const TEAM_CHAT_REQUEST_TIMEOUT_MS = 10000;
@@ -1088,34 +1089,62 @@ export class RustplusControlService {
     this.stopDeviceStateLoading();
     const pending = [...devices];
     const total = pending.length;
-    let requested = 0;
     logRust(`device state queue started: ${total} device(s)`);
+    const startPolling = () => {
+      if (this.client !== rustplus || !this.status.connected) return;
+      logRust(`device state queue completed: ${total} device(s)`);
+      this.startStoragePolling(rustplus, devices);
+      this.startMarkerPolling();
+      this.startTeamPolling();
+      this.startTeamChatPolling(rustplus);
+    };
+    const scheduleNext = (delay: number, requestNext: () => void) => {
+      this.deviceStateLoadingTimer = setTimeout(() => {
+        this.deviceStateLoadingTimer = null;
+        requestNext();
+      }, delay);
+    };
     const requestNext = () => {
       if (this.client !== rustplus || !this.status.connected) return;
-      const device = pending.shift();
-      if (!device) return;
-      requested += 1;
-      const requestNumber = requested;
+      const device = pending[0];
+      if (!device) {
+        startPolling();
+        return;
+      }
+      const requestNumber = total - pending.length + 1;
       logRust(`device state request ${requestNumber}/${total}`);
       try {
         rustplus.getEntityInfo(String(device.entityId), (message: any) => {
           if (this.client !== rustplus) return true;
-          if (message.response?.error)
+          const responseError = message.response?.error;
+          if (responseError) {
             logRust(
-              `device state response error ${requestNumber}/${total}: ${errorSummary({ name: 'Rust+ response', message: message.response.error.error })}`,
+              `device state response error ${requestNumber}/${total}: ${errorSummary({ name: 'Rust+ response', message: responseError.error })}`,
             );
+            if (
+              String(responseError.error || '')
+                .toLowerCase()
+                .includes('rate_limit')
+            ) {
+              scheduleNext(DEVICE_STATE_RATE_LIMIT_RETRY_MS, requestNext);
+              return true;
+            }
+          }
           const payload = message.response?.entityInfo?.payload;
           if (device.type === 'storage') this.publishStorageState(device.entityId, payload || {});
           else if (typeof payload?.value === 'boolean')
             this.publishEntityState(device.entityId, payload.value);
+          pending.shift();
+          if (pending.length) scheduleNext(DEVICE_STATE_REQUEST_DELAY_MS, requestNext);
+          else startPolling();
           return true;
         });
       } catch (error) {
         logRust(`device state request failed ${requestNumber}/${total}: ${errorSummary(error)}`);
+        pending.shift();
+        if (pending.length) scheduleNext(DEVICE_STATE_REQUEST_DELAY_MS, requestNext);
+        else startPolling();
       }
-      if (pending.length)
-        this.deviceStateLoadingTimer = setTimeout(requestNext, DEVICE_STATE_REQUEST_DELAY_MS);
-      else logRust(`device state queue completed: ${total} device(s)`);
     };
     requestNext();
   }
@@ -1172,10 +1201,6 @@ export class RustplusControlService {
       this.status = { connected: true, message: 'Connected' };
       logRust('connected');
       this.loadDeviceStates(rustplus, profile.devices);
-      this.startStoragePolling(rustplus, profile.devices);
-      this.startMarkerPolling();
-      this.startTeamPolling();
-      this.startTeamChatPolling(rustplus);
     });
     rustplus.on('connecting', () => {
       if (this.client === rustplus) this.status = { connected: false, message: 'Connecting...' };
