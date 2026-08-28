@@ -2,6 +2,58 @@
 
 Use this file for confirmed, project-specific lessons. Add entries in reverse chronological order.
 
+## 2026-08-28 - Never call a `<dialog>`'s close() from a mount effect's own cleanup
+
+**Context:** `frontend/src/shared/ui/modal.tsx`, wrapping `<dialog>` to call `showModal()` on mount and forward the native `close` event to a React `onClose` prop. Used by all 5 dialogs in the app (settings, discord, device, group, pairing).
+
+**What went wrong (two attempts, both confirmed wrong by the user before the fix that stuck):**
+1. First version called `dialog.close()` unconditionally in the effect cleanup while the `close` listener was still attached, with the listener wired through JSX's `onClose` prop. User: "Модалки вообще не работают" (nothing opened / closed itself immediately).
+2. Second attempt kept the `close()` call in cleanup but switched to a manually managed `addEventListener`/`removeEventListener` pair, removed *before* calling `close()`, reasoning the queued native `close` event from React StrictMode's dev-mode mount/cleanup/mount double-invoke was reaching a still-attached listener. User: "не исправилось, модалка так и не появляется" (still doesn't appear at all) — so that ordering fix was not the (whole) story; `showModal()` throws `InvalidStateError` if the dialog already has an `open` attribute, and something in the close()-then-reopen sequence on the same node was leaving it unable to reopen.
+
+**Required behavior:** Don't call `close()` on a `<dialog>` from the mount effect's cleanup at all — removing the `<dialog>` node from the document (a real unmount) implicitly drops it from the top layer on its own, so cleanup only needs to detach listeners. Guard the open call with `if (!dialog.open)` so the effect is safe to run twice on the *same* node without an intervening close, which is exactly what StrictMode's double-invoke does (the DOM node persists across the simulated remount; only the JS effect functions run twice).
+
+**Evidence:** Two consecutive user reports that the dialog didn't work after each attempted fix. jsdom's `HTMLDialogElement` has no `showModal`/`close` implementation (confirmed via `node_modules/jsdom/lib/jsdom/living/nodes/HTMLDialogElement-impl.js`), so this class of bug is invisible to the frontend test suite regardless of which cleanup approach is used — real-browser (or user) verification is required, a unit test cannot substitute for it here.
+
+## 2026-08-28 - Retry map loading on a Rust+ rate limit, like device state loading does
+
+**Context:** `loadMap` in `backend/services/rustplus-control-service.ts`, called once from `startPollingListeners` on connect.
+
+**What went wrong:** `getInfo`/`getMap` callbacks only checked `message.response?.error` generically and returned, leaving `this.map` `null` forever when Rust+ answered with a `rate_limit` error. Since `loadMap` was never retried, `GET /api/map` kept answering `409` indefinitely even though the frontend polls it (see the sibling 2026-08-28 lesson on `409` handling) expecting the server to eventually succeed.
+
+**Required behavior:** Detect `rate_limit` in the Rust+ response error (same check `loadDeviceStates` already used) and reschedule `loadMap` after a delay instead of giving up, tracking the retry timer so `clearMapState`/reconnect can cancel it.
+
+**Evidence:** User reported the map never loads when a rate limit error occurs; `loadMap` had no retry path at all while `loadDeviceStates` already implemented one for the same class of error.
+
+## 2026-08-28 - Do not add typescript-eslint to this repository
+
+**Context:** Adding a linter that reports React hook dependency problems in `frontend/src`.
+
+**What went wrong:** `typescript-eslint` was installed and configured, but it refuses to load on this project's TypeScript version, so the linter could not run at all.
+
+**Required behavior:** Lint this repository with `oxlint` (`npm run lint`, configured in `.oxlintrc.json`). Do not reintroduce `typescript-eslint` while the project stays on TypeScript 7; its released versions cap support at `<6.1.0`.
+
+**Evidence:** `npm install` failed with a peer conflict against `typescript@7.0.2`, and after forcing the install, `npx eslint` aborted with `Error: typescript-eslint does not support TS 7.0.` (tracked in typescript-eslint issue #10940).
+
+## 2026-08-28 - Treat GET /api/map 409 as not-ready, not an error
+
+**Context:** Rendering the Rust+ map in `frontend/src/features/map`.
+
+**What went wrong:** The map view showed a hard failure message for any non-OK response. Because the query client does not retry, a freshly connected server left the map permanently blank.
+
+**Required behavior:** `GET /api/map` answers `409` with `Map is not available yet.` until the server has received the map. Keep polling on `409` and only report a failure for other statuses.
+
+**Evidence:** Running the app against a live server returned `GET /api/map [409]`; the Map tab rendered "Map could not be loaded." and never recovered until polling on `409` was added.
+
+## 2026-08-28 - Verify a piped npm command actually succeeded
+
+**Context:** Installing dev dependencies through the Bash tool with output piped to `tail`.
+
+**What went wrong:** `npm install ... | tail` reported exit code 0 because the exit status came from `tail`, and the failed install was reported to the user as successful.
+
+**Required behavior:** Confirm an install by checking the result rather than the piped exit code, for example by listing the expected directory under `node_modules` or reading the package's entry in `package.json`.
+
+**Evidence:** The background task reported "exit code 0" while the captured output contained `npm error ... Could not resolve dependency`, and none of the requested packages were present in `node_modules`.
+
 ## 2026-08-27 - Tolerate incomplete AppInfo responses
 
 **Context:** Loading Rust+ map metadata through `getInfo`.

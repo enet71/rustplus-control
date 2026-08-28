@@ -1,0 +1,70 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import './map.css';
+
+:root {
+  --background: #09090b;
+  --foreground: #f2f3f3;
+  --card: #0e0f11;
+  --card-foreground: #f2f3f3;
+  --popover: #121316;
+  --popover-foreground: #f2f3f3;
+  --primary: #35a878;
+  --primary-foreground: #04120b;
+  --secondary: #17181b;
+  --secondary-foreground: #e6e7e8;
+  --muted: #101113;
+  --muted-foreground: #86898f;
+  --accent: #3ddc9a;
+  --accent-foreground: #04120b;
+  --destructive: #e0555f;
+  --destructive-foreground: #ffffff;
+  --success: #3ddc9a;
+  --warning: #f2b04c;
+  --border: #1d1e22;
+  --input: #26272c;
+  --input-background: #101113;
+  --ring: #35a878;
+  --radius: 0.75rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Inter, system-ui, sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}

@@ -4,7 +4,7 @@
 
 - This is a local Rust+ control application built with Node.js, Express, and `@liamcottle/rustplus.js`.
 - `server.js` owns the HTTP API, Rust+ connection lifecycle, FCM registration/listening, and local configuration persistence.
-- `public/` contains the static browser UI. Keep browser code framework-free and compatible with the existing plain JavaScript/CSS structure.
+- `frontend/src/` contains the React browser UI, organised by feature. Keep the established layering: `app/` holds routing and providers, `shared/` holds the HTTP transport, session store and cross-feature types, and each folder under `features/` owns its own components, react-query hooks and pure helpers.
 - `scripts/` contains supporting Node scripts, including the FCM listener and the post-install package patch.
 
 ## Skills
@@ -19,7 +19,12 @@ Before acting on a task, identify the applicable skills in `.agents/skills/` and
 
 - Install dependencies: `npm install`
 - Start the local application: `npm start`
-- Run automated tests: `npm test`
+- Run automated tests: `npm test` (format check, lint, build, frontend tests, backend tests)
+- Run the backend alone (API on `3010`, no frontend bundle): `npm run dev:backend`
+- Run the frontend dev server against that API: `npm run dev:frontend` (serves `http://localhost:5173`, proxies `/api` to `127.0.0.1:3010`)
+- Check types only: `npm run typecheck`
+- Lint only: `npm run lint`
+- Run only the frontend tests: `npm run test:frontend`
 
 The server binds to `127.0.0.1` and uses port `3010` by default. Change the port through the `PORT` environment variable rather than hard-coding a new value. Set `HOST=0.0.0.0` only when the process is behind a reverse proxy or inside the deployment container network.
 
@@ -29,7 +34,9 @@ The server binds to `127.0.0.1` and uses port `3010` by default. Change the port
 - Preserve the CommonJS module style and the existing direct Express route definitions unless a change genuinely requires a larger refactor.
 - Keep Rust+ and FCM process lifecycle state in `server.js`; do not expose child-process control directly to the browser.
 - Keep API error responses JSON and validate all request data before persisting it or passing it to Rust+.
-- When changing an API endpoint, update every affected client caller in `public/` in the same change.
+- When changing an API endpoint, update every affected client caller under `frontend/src/features/` in the same change.
+- Read server state through a react-query `useQuery` hook and write it through a `useMutation` that invalidates the affected `queryKeys` entry; do not fetch directly from a component effect.
+- Keep navigation in the router. `shared/http.ts` clears a rejected access key and `app/require-auth.tsx` redirects; the transport layer must not navigate.
 - For browser polling or async actions, handle failed HTTP requests and keep UI controls consistent with in-flight state.
 - Prefer small, focused changes. Do not reformat unrelated code or replace existing UI patterns without a product reason.
 

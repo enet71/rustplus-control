@@ -1,0 +1,87 @@
+export type DeviceType = 'switch' | 'alarm' | 'storage';
+
+export type Device = {
+  entityId: string;
+  name: string;
+  type: DeviceType;
+  sortOrder?: number;
+  iconUrl?: string;
+};
+
+export type DeviceGroup = {
+  id: string;
+  name: string;
+  deviceIds: string[];
+  sortOrder?: number;
+};
+
+export type StorageItem = {
+  itemId: number;
+  quantity: number;
+  item?: { displayName?: string; iconUrl?: string };
+};
+
+export type StorageState = { capacity: number; items: StorageItem[] };
+
+export type DashboardState = {
+  connected: boolean;
+  message: string;
+  deviceStates: Record<string, boolean | undefined>;
+  storageStates: Record<string, StorageState | undefined>;
+  mapMarkers: MapPoint[];
+  teamMapMembers: Array<MapPoint & { id: string; name: string; isOnline: boolean }>;
+  config: {
+    activeServerId?: string;
+    servers: Array<{ id: string; name: string }>;
+    devices: Device[];
+    groups: DeviceGroup[];
+    discordConfigured: boolean;
+  };
+};
+
+export type MapPoint = { id: string; x: number; y: number; type?: number; name?: string };
+
+export type RustMap = {
+  width: number;
+  height: number;
+  oceanMargin: number;
+  mapSize: number;
+  image: string;
+};
+
+export type AppEvent = {
+  id: string;
+  title: string;
+  body: string;
+  type: string | number;
+  createdAt: string;
+};
+
+export type FcmStatus = {
+  registrationAvailable: boolean;
+  registered: boolean;
+  listening: boolean;
+  message: string;
+};
+
+export type PendingPairing = {
+  id: string;
+  entityId: string;
+  name: string;
+  type: DeviceType;
+};
+
+export type Settings = {
+  server: {
+    name: string;
+    host: string;
+    port: string;
+    playerId: string;
+    playerToken: string;
+    useProxy: boolean;
+  };
+  fcm: Record<
+    'androidId' | 'securityToken' | 'token' | 'expoPushToken' | 'rustplusAuthToken',
+    string
+  >;
+};

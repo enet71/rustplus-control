@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { RustplusControlService } = require('../dist/services/rustplus-control-service');
+const { RustplusControlService } = require('../dist/backend/services/rustplus-control-service');
 
 function createControl() {
   const repository = {
