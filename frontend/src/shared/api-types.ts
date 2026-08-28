@@ -32,6 +32,7 @@ export type DashboardState = {
   teamMapMembers: Array<
     MapPoint & { id: string; name: string; isOnline: boolean; avatarUrl?: string }
   >;
+  deathMarkers: Array<{ id: string; playerId: string; name: string; x: number; y: number }>;
   config: {
     activeServerId?: string;
     servers: Array<{ id: string; name: string }>;
@@ -43,12 +44,15 @@ export type DashboardState = {
 
 export type MapPoint = { id: string; x: number; y: number; type?: number; name?: string };
 
+export type RustMonument = { token: string; x: number; y: number };
+
 export type RustMap = {
   width: number;
   height: number;
   oceanMargin: number;
   mapSize: number;
   image: string;
+  monuments: RustMonument[];
 };
 
 export type AppEvent = {

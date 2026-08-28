@@ -270,6 +270,70 @@ test('team members get Steam avatars fetched and cached for the next poll', asyn
   }
 });
 
+test('keeps only the two most recent death locations per player', () => {
+  const repository = {
+    migrateLegacyFcmConfig() {},
+    loadConfig() {
+      return { activeServerId: 'server', servers: [] };
+    },
+    hasFcmConfig() {
+      return false;
+    },
+  };
+  const control = new RustplusControlService(repository, process.cwd(), false);
+  // Rust+ only reports a member's *current* x/y, so a death location is only ever
+  // visible for the one poll where it's detected — hence driving the poll cycle
+  // by hand here instead of relying on setInterval's real 10s cadence.
+  const cycles = [
+    { x: 0, y: 0, isAlive: true, deathTime: 0 }, // baseline
+    { x: 10, y: 20, isAlive: false, deathTime: 100 }, // death #1
+    { x: 50, y: 50, isAlive: true, deathTime: 100 }, // respawn
+    { x: 30, y: 40, isAlive: false, deathTime: 200 }, // death #2
+    { x: 60, y: 60, isAlive: true, deathTime: 200 }, // respawn
+    { x: 70, y: 80, isAlive: false, deathTime: 300 }, // death #3 — should push out death #1
+  ];
+  let cycleIndex = 0;
+  const client = {
+    getTeamInfo(callback) {
+      const cycle = cycles[cycleIndex];
+      cycleIndex += 1;
+      callback({
+        response: {
+          teamInfo: { members: [{ steamId: '1', name: 'Alice', ...cycle }] },
+        },
+      });
+    },
+  };
+  control.client = client;
+  control.status = { connected: true, message: 'Connected' };
+  const intervals = [];
+  const originalSetInterval = global.setInterval;
+  global.setInterval = (callback) => {
+    intervals.push(callback);
+    return {};
+  };
+
+  try {
+    control.startTeamPolling();
+    intervals[0]();
+    intervals[0]();
+    intervals[0]();
+    intervals[0]();
+    intervals[0]();
+
+    assert.deepEqual(
+      control.getState().deathMarkers.map((marker) => ({ x: marker.x, y: marker.y })),
+      [
+        { x: 70, y: 80 },
+        { x: 30, y: 40 },
+      ],
+    );
+  } finally {
+    global.setInterval = originalSetInterval;
+    control.stopTeamPolling();
+  }
+});
+
 test('device state loading retries the same device after a Rust+ rate limit', () => {
   const repository = {
     migrateLegacyFcmConfig() {},
@@ -336,6 +400,11 @@ test('Rust+ map image is exposed with its coordinate metadata', () => {
             height: 4500,
             oceanMargin: 100,
             jpgImage: Buffer.from('map-image'),
+            monuments: [
+              { token: 'trainyard_display_name', x: 1200, y: 800 },
+              { token: '', x: 10, y: 10 },
+              { token: 'no_coords' },
+            ],
           },
         },
       });
@@ -351,6 +420,7 @@ test('Rust+ map image is exposed with its coordinate metadata', () => {
     oceanMargin: 100,
     mapSize: 4000,
     image: 'data:image/jpeg;base64,bWFwLWltYWdl',
+    monuments: [{ token: 'trainyard_display_name', x: 1200, y: 800 }],
   });
 });
 
@@ -412,6 +482,7 @@ test('map loading retries after a Rust+ rate limit instead of giving up', () => 
       oceanMargin: 100,
       mapSize: 4000,
       image: 'data:image/jpeg;base64,bWFwLWltYWdl',
+      monuments: [],
     });
   } finally {
     global.setTimeout = setTimeoutOriginal;

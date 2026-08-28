@@ -44,12 +44,23 @@ type TeamMapMember = {
   avatarUrl?: string;
 };
 type SteamAvatarEntry = { url: string; expiresAt: number };
+type DeathMarker = {
+  id: string;
+  playerId: string;
+  name: string;
+  x: number;
+  y: number;
+  deathTime: number;
+};
+const DEATH_MARKERS_PER_PLAYER = 2;
+type RustMonument = { token: string; x: number; y: number };
 type RustMap = {
   width: number;
   height: number;
   oceanMargin: number;
   mapSize: number;
   image: string;
+  monuments: RustMonument[];
 };
 
 function errorSummary(error: unknown): string {
@@ -82,6 +93,7 @@ export class RustplusControlService {
   private markerSnapshots = new Map<string, string>();
   private mapMarkers: MapMarker[] = [];
   private teamMapMembers: TeamMapMember[] = [];
+  private deathMarkers: DeathMarker[] = [];
   private readonly steamAvatarCache = new Map<string, SteamAvatarEntry>();
   private readonly steamAvatarFetchInFlight = new Set<string>();
   private map: RustMap | null = null;
@@ -145,6 +157,7 @@ export class RustplusControlService {
       storageStates: this.publicStorageStates(),
       mapMarkers: this.mapMarkers,
       teamMapMembers: this.teamMapMembers,
+      deathMarkers: this.deathMarkers,
       mapReady: Boolean(this.map),
     };
   }
@@ -221,6 +234,7 @@ export class RustplusControlService {
     this.deviceStates = {};
     this.storageStates = {};
     this.clearMapState();
+    this.deathMarkers = [];
     this.status = { connected: false, message: 'Log in to connect Rust+' };
     this.fcmStatus = { registered: false, listening: false, message: 'Not registered' };
   }
@@ -250,6 +264,7 @@ export class RustplusControlService {
     this.deviceStates = {};
     this.storageStates = {};
     this.clearMapState();
+    this.deathMarkers = [];
     if (this.fcmStatus.registered) this.connect();
     else this.status = { connected: false, message: 'Log in to connect Rust+' };
     return true;
@@ -873,7 +888,7 @@ export class RustplusControlService {
           for (const member of members) {
             const previous = this.teamDeaths.get(String(member.steamId)) || 0;
             const deathTime = Number(member.deathTime || 0);
-            if (!member.isAlive && deathTime > previous)
+            if (!member.isAlive && deathTime > previous) {
               this.publishEvent({
                 id: `${member.steamId}:${deathTime}`,
                 title: 'Player death',
@@ -881,6 +896,15 @@ export class RustplusControlService {
                 type: 'player-death',
                 createdAt: new Date().toISOString(),
               });
+              this.recordDeathMarker({
+                id: `${member.steamId}:${deathTime}`,
+                playerId: String(member.steamId),
+                name: String(member.name || 'Teammate'),
+                x: Number(member.x),
+                y: Number(member.y),
+                deathTime,
+              });
+            }
           }
         this.teamDeaths = next;
         return true;
@@ -893,6 +917,21 @@ export class RustplusControlService {
   private stopTeamPolling(): void {
     if (this.teamPolling) clearInterval(this.teamPolling);
     this.teamPolling = null;
+  }
+
+  /** Rust+ only reports each player's current position, not death history, so this
+   *  is captured ourselves at the moment a death is detected and kept per player
+   *  (newest first, capped at `DEATH_MARKERS_PER_PLAYER`). */
+  private recordDeathMarker(marker: DeathMarker): void {
+    if (!Number.isFinite(marker.x) || !Number.isFinite(marker.y)) return;
+    const ownHistory = this.deathMarkers
+      .filter((entry) => entry.playerId === marker.playerId)
+      .concat(marker)
+      .sort((a, b) => b.deathTime - a.deathTime)
+      .slice(0, DEATH_MARKERS_PER_PLAYER);
+    this.deathMarkers = this.deathMarkers
+      .filter((entry) => entry.playerId !== marker.playerId)
+      .concat(ownHistory);
   }
 
   /**
@@ -958,12 +997,25 @@ export class RustplusControlService {
           const width = Number(map?.width);
           const height = Number(map?.height);
           if (!map?.jpgImage || !Number.isFinite(width) || !Number.isFinite(height)) return true;
+          const monuments: RustMonument[] = Array.isArray(map.monuments)
+            ? map.monuments
+                .map((monument: any) => ({
+                  token: String(monument.token || ''),
+                  x: Number(monument.x),
+                  y: Number(monument.y),
+                }))
+                .filter(
+                  (monument: RustMonument) =>
+                    monument.token && Number.isFinite(monument.x) && Number.isFinite(monument.y),
+                )
+            : [];
           this.map = {
             width,
             height,
             oceanMargin: Number.isFinite(Number(map.oceanMargin)) ? Number(map.oceanMargin) : 0,
             mapSize,
             image: `data:image/jpeg;base64,${Buffer.from(map.jpgImage).toString('base64')}`,
+            monuments,
           };
           return true;
         });

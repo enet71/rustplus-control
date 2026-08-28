@@ -225,6 +225,7 @@ export function DashboardPage() {
                 serverId={state.config.activeServerId || ''}
                 teamMapMembers={state.teamMapMembers}
                 mapMarkers={state.mapMarkers}
+                deathMarkers={state.deathMarkers}
               />
             )}
           </div>

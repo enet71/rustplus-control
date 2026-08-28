@@ -6,7 +6,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { Moon, User } from 'lucide-react';
+import { MapPin, Moon, Skull, TrainFrontTunnel, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardState } from '../../shared/api-types';
 import {
@@ -15,9 +15,11 @@ import {
   fitMapSize,
   gridCellLabel,
   gridCellRect,
+  isTunnelMonument,
   mapMetrics,
   markerKind,
   markerPosition,
+  monumentLabel,
   zoomMapTransform,
   type MapTransform,
   type Size,
@@ -28,6 +30,7 @@ type MapViewProps = {
   serverId: string;
   teamMapMembers: DashboardState['teamMapMembers'];
   mapMarkers: DashboardState['mapMarkers'];
+  deathMarkers: DashboardState['deathMarkers'];
 };
 
 function MapPlaceholder({ message }: { message: string }) {
@@ -38,7 +41,7 @@ function MapPlaceholder({ message }: { message: string }) {
   );
 }
 
-export function MapView({ serverId, teamMapMembers, mapMarkers }: MapViewProps) {
+export function MapView({ serverId, teamMapMembers, mapMarkers, deathMarkers }: MapViewProps) {
   const { data: map, error } = useMap(serverId);
   // A plain ref set in a mount-only effect would miss the container: `map` is still
   // undefined on the very first render (react-query never has data synchronously),
@@ -152,27 +155,60 @@ export function MapView({ serverId, teamMapMembers, mapMarkers }: MapViewProps) 
           <div className="map-marker-layer" style={{ '--zoom': transform.scale } as CSSProperties}>
             {teamMapMembers.map((member) => (
               <span
-                className={cn('map-marker team', !member.isOnline && 'is-sleeping')}
+                className="map-marker-anchor"
                 key={member.id}
                 style={markerPosition(map, member)}
                 title={member.isOnline ? member.name : `${member.name} (sleeping)`}
               >
-                {member.avatarUrl ? (
-                  <img src={member.avatarUrl} alt="" />
-                ) : member.isOnline ? (
-                  <User className="size-4" />
-                ) : (
-                  <Moon className="size-4" />
-                )}
+                <span className={cn('map-marker team', !member.isOnline && 'is-sleeping')}>
+                  {member.avatarUrl ? (
+                    <img src={member.avatarUrl} alt="" />
+                  ) : member.isOnline ? (
+                    <User className="size-4" />
+                  ) : (
+                    <Moon className="size-4" />
+                  )}
+                </span>
+                {member.isOnline && <span className="map-marker-label">{member.name}</span>}
               </span>
             ))}
             {mapMarkers.map((marker) => (
               <span
-                className={`map-marker ${markerKind(marker.type)}`}
+                className="map-marker-anchor"
                 key={marker.id}
                 style={markerPosition(map, marker)}
                 title={marker.name || 'Map marker'}
-              />
+              >
+                <span className={`map-marker ${markerKind(marker.type)}`} />
+              </span>
+            ))}
+            {deathMarkers.map((death) => (
+              <span
+                className="map-marker-anchor"
+                key={death.id}
+                style={markerPosition(map, death)}
+                title={`${death.name} died here`}
+              >
+                <span className="map-marker death">
+                  <Skull className="size-3" />
+                </span>
+              </span>
+            ))}
+            {(map.monuments || []).map((monument, index) => (
+              <span
+                className="map-marker-anchor monument"
+                key={`${monument.token}:${index}`}
+                style={markerPosition(map, monument)}
+              >
+                <span className="map-marker monument">
+                  {isTunnelMonument(monument.token) ? (
+                    <TrainFrontTunnel className="size-3" />
+                  ) : (
+                    <MapPin className="size-3" />
+                  )}
+                </span>
+                <span className="map-marker-label monument">{monumentLabel(monument.token)}</span>
+              </span>
             ))}
           </div>
         </div>
@@ -206,6 +242,14 @@ export function MapView({ serverId, teamMapMembers, mapMarkers }: MapViewProps) 
         <span>
           <i className="map-dot map-dot-marker" />
           Server markers
+        </span>
+        <span>
+          <i className="map-dot map-dot-death" />
+          Recent deaths
+        </span>
+        <span>
+          <i className="map-dot map-dot-monument" />
+          Monuments
         </span>
       </div>
     </section>

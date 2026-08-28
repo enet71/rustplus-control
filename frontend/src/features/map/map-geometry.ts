@@ -17,6 +17,64 @@ export function gridCellLabel(index: number, columns: number): string {
   return `${gridColumnLabel(index % columns)}${Math.floor(index / columns) + 1}`;
 }
 
+/**
+ * `AppMap.Monument.token` is an internal Rust asset name (e.g.
+ * "trainyard_display_name"), not a display string — Rust+ has no localization API,
+ * so this is a best-effort translation. Tokens not listed here fall back to
+ * `prettifyMonumentToken`; report any that come out wrong so this list can grow.
+ */
+const MONUMENT_LABELS: Record<string, string> = {
+  airfield_display_name: 'Airfield',
+  arctic_research_base_display_name: 'Arctic Research Base',
+  bandit_camp: 'Bandit Camp',
+  dome_monument_name: 'The Dome',
+  ferryterminal_display_name: 'Ferry Terminal',
+  fishing_village_display_name: 'Fishing Village',
+  gas_station_1: "Oxum's Gas Station",
+  harbor_1: 'Harbor',
+  harbor_2: 'Harbor',
+  junkyard_display_name: 'Junkyard',
+  launch_site_display_name: 'Launch Site',
+  lighthouse_display_name: 'Lighthouse',
+  military_tunnel_1: 'Military Tunnels',
+  mining_outpost_display_name: 'Mining Outpost',
+  nuclear_missile_silo_monument_name: 'Missile Silo',
+  oilrig_1: 'Small Oil Rig',
+  large_oil_rig: 'Large Oil Rig',
+  outpost: 'Outpost',
+  compound: 'Outpost',
+  power_plant_display_name: 'Power Plant',
+  satellite_dish_display_name: 'Satellite Dish',
+  sewer_display_name: 'Sewer Branch',
+  stables_a: 'Ranch',
+  stables_b: 'Large Barn',
+  supermarket_display_name: 'Supermarket',
+  swamp_c_display_name: 'Swamp',
+  trainyard_display_name: 'Train Yard',
+  underwater_lab_display_name: 'Underwater Lab',
+  warehouse_display_name: 'Warehouse',
+  water_treatment_plant_display_name: 'Water Treatment Plant',
+  water_well_display_name: 'Water Well',
+};
+
+/** "military_tunnel_1" -> "Military Tunnel 1" for tokens with no curated label. */
+export function prettifyMonumentToken(token: string): string {
+  const cleaned = token
+    .replace(/_display_name$|_monument_name$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+  return cleaned.replace(/\w\S*/g, (word) => word[0].toUpperCase() + word.slice(1));
+}
+
+export function monumentLabel(token: string): string {
+  return MONUMENT_LABELS[token] ?? prettifyMonumentToken(token);
+}
+
+/** Rust's underground train network — these get a distinct icon on the map. */
+export function isTunnelMonument(token: string): boolean {
+  return /tunnel/i.test(token);
+}
+
 export type MapMetrics = {
   playableWidth: number;
   playableHeight: number;

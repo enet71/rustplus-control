@@ -53,20 +53,37 @@
   line-height: 1;
   text-shadow: 0 1px 2px #000;
 }
-.map-marker {
+.map-marker-anchor {
   position: absolute;
-  width: 13px;
-  height: 13px;
-  border: 2px solid var(--background);
-  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
   /* Counter-scales against the canvas zoom (see `--zoom` on `.map-marker-layer`)
-     so the marker stays a constant on-screen size while its `left`/`top` percentage
-     position still tracks pan/zoom through the scaled parent. */
+     so the marker and label stay a constant on-screen size while `left`/`top`
+     percentage position still tracks pan/zoom through the scaled parent. */
   transform: translate(-50%, -50%) scale(calc(1 / var(--zoom, 1)));
   cursor: default;
   transition:
     left 0.8s linear,
     top 0.8s linear;
+}
+.map-marker {
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--background);
+  border-radius: 50%;
+}
+.map-marker-label {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--background) 75%, transparent);
+  color: var(--foreground);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 .map-marker.team {
   display: flex;
@@ -104,6 +121,36 @@
 .map-marker.event {
   background: var(--destructive);
 }
+.map-marker.death {
+  display: flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--destructive) 55%, var(--card));
+  color: var(--destructive-foreground);
+}
+.map-marker-anchor.monument {
+  z-index: -1;
+  pointer-events: none;
+}
+.map-marker.monument {
+  display: flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--foreground) 25%, var(--card));
+  color: var(--foreground);
+  border-color: color-mix(in srgb, var(--background) 70%, transparent);
+}
+.map-marker-label.monument {
+  padding: 0 4px;
+  background: color-mix(in srgb, var(--background) 55%, transparent);
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 500;
+}
 .map-legend {
   display: flex;
   flex-shrink: 0;
@@ -130,4 +177,10 @@
 }
 .map-dot-marker {
   background: var(--warning);
+}
+.map-dot-monument {
+  background: color-mix(in srgb, var(--foreground) 25%, var(--card));
+}
+.map-dot-death {
+  background: color-mix(in srgb, var(--destructive) 55%, var(--card));
 }

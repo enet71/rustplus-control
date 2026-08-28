@@ -30,6 +30,7 @@ export function dashboardState(overrides: Partial<DashboardState> = {}): Dashboa
     storageStates: {},
     mapMarkers: [],
     teamMapMembers: [],
+    deathMarkers: [],
     config: {
       activeServerId: 'server-1',
       servers: [{ id: 'server-1', name: 'Test server' }],

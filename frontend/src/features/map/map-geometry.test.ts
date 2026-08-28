@@ -8,9 +8,12 @@ import {
   gridCellLabel,
   gridCellRect,
   gridColumnLabel,
+  isTunnelMonument,
   mapMetrics,
   markerKind,
   markerPosition,
+  monumentLabel,
+  prettifyMonumentToken,
   zoomMapTransform,
 } from './map-geometry';
 import type { RustMap } from '../../shared/api-types';
@@ -21,6 +24,7 @@ const map: RustMap = {
   oceanMargin: 250,
   mapSize: 3000,
   image: 'map.png',
+  monuments: [],
 };
 
 describe('gridColumnLabel', () => {
@@ -113,6 +117,33 @@ describe('markerKind', () => {
     expect(markerKind(8)).toBe('event');
     expect(markerKind(1)).toBe('server');
     expect(markerKind(undefined)).toBe('server');
+  });
+});
+
+describe('monumentLabel', () => {
+  it('translates known tokens to a display name', () => {
+    expect(monumentLabel('trainyard_display_name')).toBe('Train Yard');
+    expect(monumentLabel('launch_site_display_name')).toBe('Launch Site');
+  });
+
+  it('falls back to a prettified token for unknown ones', () => {
+    expect(monumentLabel('some_new_monument_display_name')).toBe('Some New Monument');
+  });
+});
+
+describe('prettifyMonumentToken', () => {
+  it('strips the display/monument name suffix and title-cases the rest', () => {
+    expect(prettifyMonumentToken('sewer_display_name')).toBe('Sewer');
+    expect(prettifyMonumentToken('dome_monument_name')).toBe('Dome');
+    expect(prettifyMonumentToken('military_tunnel_1')).toBe('Military Tunnel 1');
+  });
+});
+
+describe('isTunnelMonument', () => {
+  it('flags tokens mentioning a tunnel, case-insensitively', () => {
+    expect(isTunnelMonument('military_tunnel_1')).toBe(true);
+    expect(isTunnelMonument('Underground_Tunnel_Entrance')).toBe(true);
+    expect(isTunnelMonument('trainyard_display_name')).toBe(false);
   });
 });
 

@@ -12,6 +12,7 @@ afterEach(() => {
 function renderMap(
   response: () => Response,
   teamMapMembers: DashboardState['teamMapMembers'] = [],
+  deathMarkers: DashboardState['deathMarkers'] = [],
 ) {
   saveAccessToken('access-key');
   vi.stubGlobal(
@@ -19,11 +20,18 @@ function renderMap(
     vi.fn(() => Promise.resolve(response())),
   );
   return renderWithProviders(
-    <MapView serverId="server-1" teamMapMembers={teamMapMembers} mapMarkers={[]} />,
+    <MapView
+      serverId="server-1"
+      teamMapMembers={teamMapMembers}
+      mapMarkers={[]}
+      deathMarkers={deathMarkers}
+    />,
   );
 }
 
-function readyMapResponse(): Response {
+function readyMapResponse(
+  monuments: Array<{ token: string; x: number; y: number }> = [],
+): Response {
   return new Response(
     JSON.stringify({
       width: 2000,
@@ -31,6 +39,7 @@ function readyMapResponse(): Response {
       oceanMargin: 250,
       mapSize: 300,
       image: 'map.png',
+      monuments,
     }),
     { status: 200, headers: { 'Content-Type': 'application/json' } },
   );
@@ -70,5 +79,29 @@ describe('MapView', () => {
 
     await waitFor(() => expect(screen.queryByTitle('Awake')).not.toBeNull());
     expect(screen.queryByTitle('Asleep (sleeping)')).not.toBeNull();
+  });
+
+  it('labels only online teammates with their name, not sleeping ones', async () => {
+    renderMap(readyMapResponse, [
+      { id: '1', name: 'Awake', x: 10, y: 10, isOnline: true },
+      { id: '2', name: 'Asleep', x: 20, y: 20, isOnline: false },
+    ]);
+
+    await waitFor(() => expect(screen.queryByText('Awake')).not.toBeNull());
+    expect(screen.queryByText('Asleep')).toBeNull();
+  });
+
+  it('labels monuments using the display name translated from their token', async () => {
+    renderMap(() => readyMapResponse([{ token: 'trainyard_display_name', x: 50, y: 50 }]));
+
+    await waitFor(() => expect(screen.queryByText('Train Yard')).not.toBeNull());
+    expect(screen.queryByText('Monuments')).not.toBeNull();
+  });
+
+  it('shows recent death markers without a name label', async () => {
+    renderMap(readyMapResponse, [], [{ id: '1:100', playerId: '1', name: 'Alice', x: 30, y: 40 }]);
+
+    await waitFor(() => expect(screen.queryByTitle('Alice died here')).not.toBeNull());
+    expect(screen.queryByText('Alice')).toBeNull();
   });
 });
