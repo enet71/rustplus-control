@@ -1,40 +1,48 @@
 .rust-map {
-  display: flex;
+  position: relative;
   min-height: 0;
   flex: 1 1 0;
-  align-items: center;
-  justify-content: center;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--card);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.rust-map.is-panning {
+  cursor: grabbing;
 }
 .map-canvas {
-  position: relative;
-  width: auto;
-  height: 100%;
-  max-width: 100%;
-  max-height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
   overflow: hidden;
 }
-.rust-map img {
+.map-canvas > img {
   position: absolute;
   display: block;
   max-width: none;
+  pointer-events: none;
 }
-.map-grid-layer,
 .map-marker-layer {
   position: absolute;
   inset: 0;
 }
-.map-grid-layer {
-  display: grid;
+/* Sits outside `.map-canvas` (unscaled) so line width and label text stay a
+   constant size; each cell is positioned in container pixels instead, see
+   `gridCellRect`. */
+.map-grid-overlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
   pointer-events: none;
 }
 .map-grid-cell {
+  position: absolute;
   display: grid;
-  min-width: 0;
-  min-height: 0;
+  box-sizing: border-box;
   place-items: start end;
   border-right: 1px solid rgba(225, 237, 231, 0.28);
   border-bottom: 1px solid rgba(225, 237, 231, 0.28);
@@ -51,12 +59,44 @@
   height: 13px;
   border: 2px solid var(--background);
   border-radius: 50%;
-  transform: translate(-50%, -50%);
+  /* Counter-scales against the canvas zoom (see `--zoom` on `.map-marker-layer`)
+     so the marker stays a constant on-screen size while its `left`/`top` percentage
+     position still tracks pan/zoom through the scaled parent. */
+  transform: translate(-50%, -50%) scale(calc(1 / var(--zoom, 1)));
   cursor: default;
+  transition:
+    left 0.8s linear,
+    top 0.8s linear;
 }
 .map-marker.team {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   background: var(--accent);
+  color: var(--accent-foreground);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.map-marker.team svg {
+  width: 16px;
+  height: 16px;
+}
+.map-marker.team img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+.map-marker.team.is-sleeping {
+  background: var(--muted-foreground);
+  color: var(--card);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted-foreground) 20%, transparent);
+}
+.map-marker.team.is-sleeping img {
+  opacity: 0.7;
+  filter: grayscale(60%);
 }
 .map-marker.server {
   background: var(--warning);
@@ -84,6 +124,9 @@
 }
 .map-dot-team {
   background: var(--accent);
+}
+.map-dot-sleeping {
+  background: var(--muted-foreground);
 }
 .map-dot-marker {
   background: var(--warning);

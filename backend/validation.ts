@@ -21,9 +21,15 @@ function requiredString(value: unknown, name: string, maximum = 4096): Result<st
 }
 
 export function settingsInput(body: unknown): Result<SettingsInput> {
-  const value = (body || {}) as { server?: Record<string, unknown>; fcm?: Record<string, unknown> };
+  const value = (body || {}) as {
+    server?: Record<string, unknown>;
+    fcm?: Record<string, unknown>;
+    steamApiKey?: unknown;
+  };
   const server = value.server || {};
   const fcm = value.fcm || {};
+  const steamApiKey = String(value.steamApiKey || '').trim();
+  if (steamApiKey.length > 64) return { error: 'Steam API key must be at most 64 characters.' };
   const [
     name,
     host,
@@ -94,6 +100,7 @@ export function settingsInput(body: unknown): Result<SettingsInput> {
       useProxy: Boolean(server.useProxy),
     },
     fcm: fcmConfig,
+    steamApiKey,
   };
 }
 

@@ -29,7 +29,9 @@ export type DashboardState = {
   deviceStates: Record<string, boolean | undefined>;
   storageStates: Record<string, StorageState | undefined>;
   mapMarkers: MapPoint[];
-  teamMapMembers: Array<MapPoint & { id: string; name: string; isOnline: boolean }>;
+  teamMapMembers: Array<
+    MapPoint & { id: string; name: string; isOnline: boolean; avatarUrl?: string }
+  >;
   config: {
     activeServerId?: string;
     servers: Array<{ id: string; name: string }>;
@@ -84,4 +86,5 @@ export type Settings = {
     'androidId' | 'securityToken' | 'token' | 'expoPushToken' | 'rustplusAuthToken',
     string
   >;
+  steamApiKey: string;
 };

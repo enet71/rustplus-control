@@ -7,7 +7,7 @@ const {
   settingsInput,
 } = require('../dist/backend/validation');
 
-test('settingsInput accepts complete server and FCM settings', () => {
+test('settingsInput accepts complete server, FCM and Steam settings', () => {
   const result = settingsInput({
     server: {
       name: 'Main',
@@ -24,6 +24,7 @@ test('settingsInput accepts complete server and FCM settings', () => {
       expoPushToken: 'expo',
       rustplusAuthToken: 'rustplus',
     },
+    steamApiKey: 'abc123',
   });
 
   assert.deepEqual(result, {
@@ -43,7 +44,30 @@ test('settingsInput accepts complete server and FCM settings', () => {
       expo_push_token: 'expo',
       rustplus_auth_token: 'rustplus',
     },
+    steamApiKey: 'abc123',
   });
+});
+
+test('settingsInput rejects an overlong Steam API key', () => {
+  const result = settingsInput({
+    server: {
+      name: 'Main',
+      host: '127.0.0.1',
+      port: '28082',
+      playerId: '76561198000000000',
+      playerToken: 'player-token',
+    },
+    fcm: {
+      androidId: 'android',
+      securityToken: 'security',
+      token: 'fcm',
+      expoPushToken: 'expo',
+      rustplusAuthToken: 'rustplus',
+    },
+    steamApiKey: 'x'.repeat(65),
+  });
+
+  assert.deepEqual(result, { error: 'Steam API key must be at most 64 characters.' });
 });
 
 test('settingsInput rejects invalid Rust+ port', () => {

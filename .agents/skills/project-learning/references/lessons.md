@@ -2,6 +2,26 @@
 
 Use this file for confirmed, project-specific lessons. Add entries in reverse chronological order.
 
+## 2026-08-28 - A mount-only ref effect misses a node that isn't there on the first render
+
+**Context:** `frontend/src/features/map/map-view.tsx`, wiring a `ResizeObserver` and a native `wheel` listener to the `.rust-map` container via `useRef` + `useEffect(() => { const el = ref.current; if (!el) return; ... }, [])`.
+
+**What went wrong:** `useMap` (react-query) always returns `data: undefined` on the component's first render, even when the query resolves immediately — so the first render returned the loading placeholder, which has no `.rust-map` node. The mount-only effect ran with `ref.current === null`, bailed out, and never ran again once the real container appeared on a later render (its dependency array was `[]`). `containerSize` stayed `{0, 0}` forever, so the map rendered at zero size.
+
+**Required behavior:** When an effect must attach to a DOM node that is conditionally rendered (including "not on the first render because the data isn't there yet"), use a callback ref stored in state (`useState<HTMLDivElement | null>(null)` passed directly as `ref`) instead of `useRef` + a mount-only effect. Depend on that state value in the effect so it re-runs exactly when the node actually appears or changes, not just once at mount.
+
+**Evidence:** User reported "карта не отображается, размер 0 0" (map doesn't render, size 0 0). Fixing it also surfaced that jsdom has no `ResizeObserver` at all (the frontend test suite was passing only because the buggy effect never actually ran); a stub was added to `frontend/src/test-setup.ts`.
+
+## 2026-08-28 - AppMarker type 1 is Player, not a world/server marker
+
+**Context:** `mapMarkers` state built from `getMapMarkers` in `backend/services/rustplus-control-service.ts`, rendered on the map alongside `teamMapMembers` (from `getTeamInfo`).
+
+**What went wrong:** The frontend's marker classification (`markerKind` in `frontend/src/features/map/map-geometry.ts`) only special-cased `{CH47:4, CargoShip:5, PatrolHelicopter:8}` as "event"; every other `AppMarkerType` value — including `Player:1` — fell into the "server" (world point-of-interest) bucket. Rust+ includes your own team's members in `getMapMarkers` as `type=1` markers (duplicating `getTeamInfo`), so those got rendered as generic yellow "server" dots instead of being recognized as players.
+
+**Required behavior:** Check `node_modules/@liamcottle/rustplus.js/rustplus.proto`'s `enum AppMarkerType` before assuming what a numeric marker type means — don't infer it from which values an existing `Set`/switch happens to special-case. `Player:1` markers are redundant with `getTeamInfo` and should be filtered out of `mapMarkers` server-side (`backend/services/rustplus-control-service.ts`'s `startMarkerPolling`) rather than given a visual bucket on the frontend.
+
+**Evidence:** User reported "markers labeled as server are actually team [players]"; the proto confirms `enum AppMarkerType { Undefined=0; Player=1; Explosion=2; VendingMachine=3; CH47=4; CargoShip=5; Crate=6; GenericRadius=7; PatrolHelicopter=8; }`.
+
 ## 2026-08-28 - Never call a `<dialog>`'s close() from a mount effect's own cleanup
 
 **Context:** `frontend/src/shared/ui/modal.tsx`, wrapping `<dialog>` to call `showModal()` on mount and forward the native `close` event to a React `onClose` prop. Used by all 5 dialogs in the app (settings, discord, device, group, pairing).

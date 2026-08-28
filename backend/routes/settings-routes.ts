@@ -20,6 +20,7 @@ export function createSettingsRouter(control: RustplusControlService): Router {
     const profile = control.getActiveProfile();
     if (!profile) return response.status(404).json({ error: 'No active server.' });
     control.saveFcmSettings(input.fcm);
+    control.saveSteamApiKey(input.steamApiKey);
     control.saveSettings({
       ...profile,
       name: input.server.name,

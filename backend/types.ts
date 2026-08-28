@@ -40,6 +40,7 @@ export interface ServerProfile {
 export interface AppConfig {
   activeServerId: string | null;
   servers: ServerProfile[];
+  steamApiKey?: string;
 }
 
 export interface FcmConfig {
@@ -101,4 +102,5 @@ export interface RustEvent {
 export interface SettingsInput {
   server: RustServerSettings & { name: string };
   fcm: FcmConfig;
+  steamApiKey: string;
 }

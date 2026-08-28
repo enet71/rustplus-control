@@ -185,6 +185,91 @@ test('storage monitors are polled when broadcasts are absent', () => {
   control.stopStoragePolling();
 });
 
+test('map markers exclude AppMarkerType.Player entries already covered by team info', () => {
+  const repository = {
+    migrateLegacyFcmConfig() {},
+    loadConfig() {
+      return { activeServerId: 'server', servers: [] };
+    },
+    hasFcmConfig() {
+      return false;
+    },
+  };
+  const control = new RustplusControlService(repository, process.cwd(), false);
+  const client = {
+    getMapMarkers(callback) {
+      callback({
+        response: {
+          mapMarkers: {
+            markers: [
+              { id: 1, type: 1, x: 100, y: 100, name: '' },
+              { id: 2, type: 5, x: 200, y: 200, name: 'Cargo Ship' },
+            ],
+          },
+        },
+      });
+    },
+  };
+  control.client = client;
+  control.status = { connected: true, message: 'Connected' };
+
+  control.startMarkerPolling();
+
+  assert.deepEqual(
+    control.getState().mapMarkers.map((marker) => marker.id),
+    ['2'],
+  );
+  control.stopMarkerPolling();
+});
+
+test('team members get Steam avatars fetched and cached for the next poll', async () => {
+  const repository = {
+    migrateLegacyFcmConfig() {},
+    loadConfig() {
+      return { activeServerId: 'server', servers: [] };
+    },
+    hasFcmConfig() {
+      return false;
+    },
+  };
+  const control = new RustplusControlService(repository, process.cwd(), false);
+  control.config.steamApiKey = 'test-key';
+  const client = {
+    getTeamInfo(callback) {
+      callback({
+        response: {
+          teamInfo: {
+            members: [{ steamId: '123', name: 'Alice', x: 1, y: 2, isOnline: true }],
+          },
+        },
+      });
+    },
+  };
+  control.client = client;
+  control.status = { connected: true, message: 'Connected' };
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      response: { players: [{ steamid: '123', avatarfull: 'https://avatar.example/123.jpg' }] },
+    }),
+  });
+
+  try {
+    control.startTeamPolling();
+    assert.equal(control.getState().teamMapMembers[0].avatarUrl, undefined);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    control.startTeamPolling();
+    assert.equal(control.getState().teamMapMembers[0].avatarUrl, 'https://avatar.example/123.jpg');
+  } finally {
+    global.fetch = originalFetch;
+    control.stopTeamPolling();
+  }
+});
+
 test('device state loading retries the same device after a Rust+ rate limit', () => {
   const repository = {
     migrateLegacyFcmConfig() {},

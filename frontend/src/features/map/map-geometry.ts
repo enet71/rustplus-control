@@ -63,3 +63,92 @@ const EVENT_MARKER_TYPES = new Set([4, 5, 8]);
 export function markerKind(type: number | undefined): 'event' | 'server' {
   return EVENT_MARKER_TYPES.has(type || 0) ? 'event' : 'server';
 }
+
+export const MIN_MAP_ZOOM = 1;
+export const MAX_MAP_ZOOM = 6;
+export const INITIAL_MAP_ZOOM = (MIN_MAP_ZOOM + MAX_MAP_ZOOM) / 2;
+
+export type MapTransform = { x: number; y: number; scale: number };
+export type Size = { width: number; height: number };
+
+/** The largest box preserving `aspect` (width / height) that fits inside `container`. */
+export function fitMapSize(container: Size, aspect: number): Size {
+  if (!container.width || !container.height || !Number.isFinite(aspect) || aspect <= 0)
+    return { width: 0, height: 0 };
+  let width = container.width;
+  let height = width / aspect;
+  if (height > container.height) {
+    height = container.height;
+    width = height * aspect;
+  }
+  return { width, height };
+}
+
+/**
+ * Keeps content centered on an axis where it is smaller than the container, and
+ * otherwise stops it from panning past its edges.
+ */
+export function clampPanAxis(position: number, contentSize: number, containerSize: number): number {
+  if (contentSize <= containerSize) return (containerSize - contentSize) / 2;
+  return Math.min(0, Math.max(containerSize - contentSize, position));
+}
+
+export function clampMapTransform(
+  transform: MapTransform,
+  fitSize: Size,
+  container: Size,
+): MapTransform {
+  return {
+    scale: transform.scale,
+    x: clampPanAxis(transform.x, fitSize.width * transform.scale, container.width),
+    y: clampPanAxis(transform.y, fitSize.height * transform.scale, container.height),
+  };
+}
+
+export function centeredMapTransform(
+  fitSize: Size,
+  container: Size,
+  scale: number = INITIAL_MAP_ZOOM,
+): MapTransform {
+  return {
+    x: (container.width - fitSize.width * scale) / 2,
+    y: (container.height - fitSize.height * scale) / 2,
+    scale,
+  };
+}
+
+/** Zooms the transform so the point under the cursor stays fixed on screen. */
+export function zoomMapTransform(
+  current: MapTransform,
+  cursor: { x: number; y: number },
+  factor: number,
+): MapTransform {
+  const scale = Math.min(MAX_MAP_ZOOM, Math.max(MIN_MAP_ZOOM, current.scale * factor));
+  const localX = (cursor.x - current.x) / current.scale;
+  const localY = (cursor.y - current.y) / current.scale;
+  return { scale, x: cursor.x - localX * scale, y: cursor.y - localY * scale };
+}
+
+export type PixelRect = { left: number; top: number; width: number; height: number };
+
+/**
+ * A grid cell's on-screen box in container pixels. Rendered outside the zoomed
+ * canvas so its border width and label size stay constant instead of growing with
+ * `transform.scale` — only the box's position and size (i.e. where the lines fall)
+ * track the zoom.
+ */
+export function gridCellRect(
+  index: number,
+  columns: number,
+  fitSize: Size,
+  transform: MapTransform,
+): PixelRect {
+  const width = (fitSize.width * transform.scale) / columns;
+  const height = (fitSize.height * transform.scale) / columns;
+  return {
+    left: transform.x + (index % columns) * width,
+    top: transform.y + Math.floor(index / columns) * height,
+    width,
+    height,
+  };
+}

@@ -45,6 +45,9 @@ function SettingsForm({
   const updateFcm = (field: (typeof FCM_FIELDS)[number], value: string): void =>
     setDraft((current) => ({ ...current, fcm: { ...current.fcm, [field]: value } }));
 
+  const updateSteamApiKey = (value: string): void =>
+    setDraft((current) => ({ ...current, steamApiKey: value }));
+
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     try {
@@ -127,6 +130,19 @@ function SettingsForm({
             />
           </div>
         ))}
+      </fieldset>
+      <fieldset className="grid gap-3 rounded-md border border-input p-3">
+        <legend className="px-1 text-sm text-muted-foreground">Steam</legend>
+        <div className="grid gap-1.5">
+          <Label htmlFor="settings-steam-api-key">Steam API key</Label>
+          <Input
+            id="settings-steam-api-key"
+            type={showSecrets ? 'text' : 'password'}
+            value={draft.steamApiKey || ''}
+            onChange={(event) => updateSteamApiKey(event.target.value)}
+            placeholder="Optional — shows player avatars on the map"
+          />
+        </div>
       </fieldset>
       <Label className="font-normal text-foreground">
         <Checkbox

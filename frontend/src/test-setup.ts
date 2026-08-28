@@ -7,3 +7,13 @@ afterEach(() => {
   cleanup();
   localStorage.clear();
 });
+
+// jsdom does not implement ResizeObserver. jsdom also never lays elements out (every
+// size is 0), so this stub cannot report real dimensions either way — it only lets
+// code that observes an element run without throwing.
+class ResizeObserverStub {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;

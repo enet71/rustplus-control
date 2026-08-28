@@ -27,12 +27,23 @@ const TEAM_CHAT_POLLING_INTERVAL_MS = 3000;
 const TEAM_CHAT_REQUEST_TIMEOUT_MS = 10000;
 const TEAM_CHAT_SEEN_LIMIT = 500;
 const TEAM_CHAT_MESSAGE_PREFIX = '[rust-control]';
+/** AppMarkerType.Player: teammates already come from getTeamInfo, so map markers exclude them. */
+const MARKER_TYPE_PLAYER = 1;
+const STEAM_AVATAR_CACHE_MS = 60 * 60 * 1000;
 
 type SwitchCommandResult = 'not-connected' | 'unknown' | 'no-switches' | 'failed' | null;
 type TeamChatRequest = { rustplus: any; timeout: NodeJS.Timeout | null };
 type ChatTarget = { name: string; switchIds: string[]; isGroup: boolean };
 type MapMarker = { id: string; type: number; x: number; y: number; name: string };
-type TeamMapMember = { id: string; name: string; x: number; y: number; isOnline: boolean };
+type TeamMapMember = {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  isOnline: boolean;
+  avatarUrl?: string;
+};
+type SteamAvatarEntry = { url: string; expiresAt: number };
 type RustMap = {
   width: number;
   height: number;
@@ -71,6 +82,8 @@ export class RustplusControlService {
   private markerSnapshots = new Map<string, string>();
   private mapMarkers: MapMarker[] = [];
   private teamMapMembers: TeamMapMember[] = [];
+  private readonly steamAvatarCache = new Map<string, SteamAvatarEntry>();
+  private readonly steamAvatarFetchInFlight = new Set<string>();
   private map: RustMap | null = null;
   private teamDeaths = new Map<string, number>();
   private readonly eventClients = new Set<Response>();
@@ -164,7 +177,12 @@ export class RustplusControlService {
         expoPushToken: fcm.expo_push_token || '',
         rustplusAuthToken: fcm.rustplus_auth_token || '',
       },
+      steamApiKey: this.config.steamApiKey || '',
     };
+  }
+
+  saveSteamApiKey(steamApiKey: string): void {
+    this.saveConfig({ ...this.config, steamApiKey: steamApiKey || undefined });
   }
 
   saveSettings(profile: ServerProfile): void {
@@ -769,6 +787,7 @@ export class RustplusControlService {
         const markers = message.response?.mapMarkers?.markers;
         if (!Array.isArray(markers)) return true;
         this.mapMarkers = markers
+          .filter((marker: any) => Number(marker.type) !== MARKER_TYPE_PLAYER)
           .map((marker: any) => ({
             id: String(marker.id),
             type: Number(marker.type),
@@ -834,17 +853,19 @@ export class RustplusControlService {
       this.client.getTeamInfo((message: any) => {
         const members = message.response?.teamInfo?.members;
         if (!Array.isArray(members)) return true;
-        this.teamMapMembers = members
-          .map((member: any) => ({
-            id: String(member.steamId),
-            name: String(member.name || 'Teammate'),
-            x: Number(member.x),
-            y: Number(member.y),
-            isOnline: Boolean(member.isOnline),
-          }))
-          .filter(
-            (member: TeamMapMember) => Number.isFinite(member.x) && Number.isFinite(member.y),
-          );
+        this.teamMapMembers = this.attachSteamAvatars(
+          members
+            .map((member: any) => ({
+              id: String(member.steamId),
+              name: String(member.name || 'Teammate'),
+              x: Number(member.x),
+              y: Number(member.y),
+              isOnline: Boolean(member.isOnline),
+            }))
+            .filter(
+              (member: TeamMapMember) => Number.isFinite(member.x) && Number.isFinite(member.y),
+            ),
+        );
         const next = new Map(
           members.map((member: any) => [String(member.steamId), Number(member.deathTime || 0)]),
         );
@@ -872,6 +893,47 @@ export class RustplusControlService {
   private stopTeamPolling(): void {
     if (this.teamPolling) clearInterval(this.teamPolling);
     this.teamPolling = null;
+  }
+
+  /**
+   * Reads whatever avatar URLs are already cached and kicks off a background refresh
+   * for any missing or stale ones; the refresh lands on the *next* poll cycle rather
+   * than blocking this one.
+   */
+  private attachSteamAvatars(members: TeamMapMember[]): TeamMapMember[] {
+    const apiKey = this.config.steamApiKey;
+    if (!apiKey) return members;
+    const now = Date.now();
+    const stale = members
+      .map((member) => member.id)
+      .filter((id) => {
+        const cached = this.steamAvatarCache.get(id);
+        return (!cached || cached.expiresAt < now) && !this.steamAvatarFetchInFlight.has(id);
+      });
+    if (stale.length) this.refreshSteamAvatars(apiKey, stale);
+    return members.map((member) => {
+      const cached = this.steamAvatarCache.get(member.id);
+      return cached ? { ...member, avatarUrl: cached.url } : member;
+    });
+  }
+
+  private refreshSteamAvatars(apiKey: string, steamIds: string[]): void {
+    steamIds.forEach((id) => this.steamAvatarFetchInFlight.add(id));
+    const url = `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${encodeURIComponent(apiKey)}&steamids=${steamIds.join(',')}`;
+    fetch(url)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: any) => {
+        const players = data?.response?.players;
+        if (!Array.isArray(players)) return;
+        const expiresAt = Date.now() + STEAM_AVATAR_CACHE_MS;
+        for (const player of players) {
+          const avatarUrl = String(player.avatarfull || player.avatarmedium || player.avatar || '');
+          if (avatarUrl)
+            this.steamAvatarCache.set(String(player.steamid), { url: avatarUrl, expiresAt });
+        }
+      })
+      .catch((error) => logRust(`steam avatar fetch failed: ${errorSummary(error)}`))
+      .finally(() => steamIds.forEach((id) => this.steamAvatarFetchInFlight.delete(id)));
   }
 
   private loadMap(rustplus: any): void {

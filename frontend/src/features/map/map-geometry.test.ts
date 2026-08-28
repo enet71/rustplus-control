@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  INITIAL_MAP_ZOOM,
+  centeredMapTransform,
+  clampMapTransform,
+  clampPanAxis,
+  fitMapSize,
   gridCellLabel,
+  gridCellRect,
   gridColumnLabel,
   mapMetrics,
   markerKind,
   markerPosition,
+  zoomMapTransform,
 } from './map-geometry';
 import type { RustMap } from '../../shared/api-types';
 
@@ -32,6 +39,34 @@ describe('gridCellLabel', () => {
     expect(gridCellLabel(0, 4)).toBe('A1');
     expect(gridCellLabel(3, 4)).toBe('D1');
     expect(gridCellLabel(4, 4)).toBe('A2');
+  });
+});
+
+describe('gridCellRect', () => {
+  it('places cells in container pixels, tracking pan and zoom', () => {
+    const fitSize = { width: 400, height: 400 };
+    expect(gridCellRect(0, 4, fitSize, { x: 0, y: 0, scale: 1 })).toEqual({
+      left: 0,
+      top: 0,
+      width: 100,
+      height: 100,
+    });
+    expect(gridCellRect(5, 4, fitSize, { x: 0, y: 0, scale: 1 })).toEqual({
+      left: 100,
+      top: 100,
+      width: 100,
+      height: 100,
+    });
+  });
+
+  it('scales cell size and offsets position with the current zoom and pan', () => {
+    const fitSize = { width: 400, height: 400 };
+    expect(gridCellRect(0, 4, fitSize, { x: 10, y: 20, scale: 2 })).toEqual({
+      left: 10,
+      top: 20,
+      width: 200,
+      height: 200,
+    });
   });
 });
 
@@ -78,5 +113,69 @@ describe('markerKind', () => {
     expect(markerKind(8)).toBe('event');
     expect(markerKind(1)).toBe('server');
     expect(markerKind(undefined)).toBe('server');
+  });
+});
+
+describe('fitMapSize', () => {
+  it('shrinks the width when the container is taller than the map is wide', () => {
+    expect(fitMapSize({ width: 1000, height: 1000 }, 2)).toEqual({ width: 1000, height: 500 });
+  });
+
+  it('shrinks the height when the container is wider than the map is tall', () => {
+    expect(fitMapSize({ width: 1000, height: 200 }, 1)).toEqual({ width: 200, height: 200 });
+  });
+});
+
+describe('clampPanAxis', () => {
+  it('centers content that is smaller than the container', () => {
+    expect(clampPanAxis(999, 400, 1000)).toBe(300);
+  });
+
+  it('stops content larger than the container from panning past its edges', () => {
+    expect(clampPanAxis(50, 1500, 1000)).toBe(0);
+    expect(clampPanAxis(-900, 1500, 1000)).toBe(-500);
+    expect(clampPanAxis(-9999, 1500, 1000)).toBe(-500);
+  });
+});
+
+describe('centeredMapTransform', () => {
+  it('defaults to the halfway zoom level, centered', () => {
+    expect(INITIAL_MAP_ZOOM).toBe(3.5);
+    expect(centeredMapTransform({ width: 400, height: 400 }, { width: 1000, height: 800 })).toEqual(
+      { x: -200, y: -300, scale: 3.5 },
+    );
+  });
+
+  it('centers the fitted content at an explicit scale', () => {
+    expect(
+      centeredMapTransform({ width: 400, height: 400 }, { width: 1000, height: 800 }, 1),
+    ).toEqual({ x: 300, y: 200, scale: 1 });
+  });
+});
+
+describe('clampMapTransform', () => {
+  it('re-centers an axis once zooming out makes it smaller than the container', () => {
+    const next = clampMapTransform(
+      { x: -400, y: -400, scale: 1 },
+      { width: 500, height: 500 },
+      { width: 1000, height: 1000 },
+    );
+
+    expect(next).toEqual({ x: 250, y: 250, scale: 1 });
+  });
+});
+
+describe('zoomMapTransform', () => {
+  it('keeps the point under the cursor fixed on screen while zooming in', () => {
+    const next = zoomMapTransform({ x: 0, y: 0, scale: 1 }, { x: 100, y: 100 }, 2);
+
+    expect(next.scale).toBe(2);
+    expect(next.x).toBe(-100);
+    expect(next.y).toBe(-100);
+  });
+
+  it('never zooms past the configured min/max', () => {
+    expect(zoomMapTransform({ x: 0, y: 0, scale: 1 }, { x: 0, y: 0 }, 0.1).scale).toBe(1);
+    expect(zoomMapTransform({ x: 0, y: 0, scale: 6 }, { x: 0, y: 0 }, 10).scale).toBe(6);
   });
 });

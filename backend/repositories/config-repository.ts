@@ -26,6 +26,7 @@ export class ConfigRepository {
         return {
           activeServerId: loaded.activeServerId || loaded.servers[0]?.id || null,
           servers: loaded.servers,
+          steamApiKey: loaded.steamApiKey || undefined,
         };
       }
       if (this.isLegacyConfig(loaded)) {
