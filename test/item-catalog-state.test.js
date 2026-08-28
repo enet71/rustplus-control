@@ -334,6 +334,63 @@ test('keeps only the two most recent death locations per player', () => {
   }
 });
 
+test('player-death events include the grid square the death happened in', () => {
+  const repository = {
+    migrateLegacyFcmConfig() {},
+    loadConfig() {
+      return { activeServerId: 'server', servers: [] };
+    },
+    hasFcmConfig() {
+      return false;
+    },
+  };
+  const control = new RustplusControlService(repository, process.cwd(), false);
+  control.map = {
+    mapSize: 300,
+    width: 2000,
+    height: 2000,
+    oceanMargin: 250,
+    image: 'map.png',
+    monuments: [],
+  };
+  const cycles = [
+    { x: 0, y: 0, isAlive: true, deathTime: 0 },
+    { x: 10, y: 20, isAlive: false, deathTime: 100 }, // column 0 (x<150), row: (300-20)/150 -> row index 1 -> "A2"
+  ];
+  let cycleIndex = 0;
+  control.client = {
+    getTeamInfo(callback) {
+      const cycle = cycles[cycleIndex];
+      cycleIndex += 1;
+      callback({
+        response: { teamInfo: { members: [{ steamId: '1', name: 'Alice', ...cycle }] } },
+      });
+    },
+  };
+  control.status = { connected: true, message: 'Connected' };
+  const written = [];
+  control.subscribeEvents({ write: (chunk) => written.push(chunk) });
+  const intervals = [];
+  const originalSetInterval = global.setInterval;
+  global.setInterval = (callback) => {
+    intervals.push(callback);
+    return {};
+  };
+
+  try {
+    control.startTeamPolling();
+    intervals[0]();
+
+    const deathEvent = written
+      .map((chunk) => JSON.parse(chunk.slice(chunk.indexOf('data: ') + 'data: '.length)))
+      .find((event) => event.type === 'player-death');
+    assert.equal(deathEvent.body, 'Alice died in A2');
+  } finally {
+    global.setInterval = originalSetInterval;
+    control.stopTeamPolling();
+  }
+});
+
 test('device state loading retries the same device after a Rust+ rate limit', () => {
   const repository = {
     migrateLegacyFcmConfig() {},

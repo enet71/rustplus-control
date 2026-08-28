@@ -53,6 +53,9 @@ type DeathMarker = {
   deathTime: number;
 };
 const DEATH_MARKERS_PER_PLAYER = 2;
+/** Matches the grid cell size the map overlay draws in `map-geometry.ts`, so a
+ *  death's grid square lines up with the square the player sees on the map. */
+const GRID_CELL_SIZE = 150;
 type RustMonument = { token: string; x: number; y: number };
 type RustMap = {
   width: number;
@@ -62,6 +65,28 @@ type RustMap = {
   image: string;
   monuments: RustMonument[];
 };
+
+/** Rust grid column names: A, B, ... Z, AA, AB, ... */
+function gridColumnLabel(index: number): string {
+  let value = index + 1;
+  let name = '';
+  while (value) {
+    name = String.fromCharCode(65 + ((value - 1) % 26)) + name;
+    value = Math.floor((value - 1) / 26);
+  }
+  return name;
+}
+
+/** Grid square (e.g. "K14") a world position falls into, matching the labels the
+ *  map overlay draws in `map-geometry.ts`'s `gridCellLabel`. */
+function gridSquareLabel(mapSize: number, x: number, y: number): string | null {
+  if (!Number.isFinite(mapSize) || mapSize <= 0 || !Number.isFinite(x) || !Number.isFinite(y))
+    return null;
+  const columns = Math.ceil(mapSize / GRID_CELL_SIZE);
+  const column = Math.min(columns - 1, Math.max(0, Math.floor(x / GRID_CELL_SIZE)));
+  const row = Math.min(columns - 1, Math.max(0, Math.floor((mapSize - y) / GRID_CELL_SIZE)));
+  return `${gridColumnLabel(column)}${row + 1}`;
+}
 
 function errorSummary(error: unknown): string {
   const value = error as { name?: unknown; message?: unknown } | null;
@@ -889,10 +914,13 @@ export class RustplusControlService {
             const previous = this.teamDeaths.get(String(member.steamId)) || 0;
             const deathTime = Number(member.deathTime || 0);
             if (!member.isAlive && deathTime > previous) {
+              const square = this.map
+                ? gridSquareLabel(this.map.mapSize, Number(member.x), Number(member.y))
+                : null;
               this.publishEvent({
                 id: `${member.steamId}:${deathTime}`,
                 title: 'Player death',
-                body: `${member.name} died`,
+                body: square ? `${member.name} died in ${square}` : `${member.name} died`,
                 type: 'player-death',
                 createdAt: new Date().toISOString(),
               });

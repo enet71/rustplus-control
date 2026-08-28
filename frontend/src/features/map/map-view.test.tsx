@@ -98,10 +98,14 @@ describe('MapView', () => {
     expect(screen.queryByText('Monuments')).not.toBeNull();
   });
 
-  it('shows recent death markers without a name label', async () => {
-    renderMap(readyMapResponse, [], [{ id: '1:100', playerId: '1', name: 'Alice', x: 30, y: 40 }]);
+  it('shows recent death markers without a name label, with the death time on hover', async () => {
+    renderMap(
+      readyMapResponse,
+      [],
+      [{ id: '1:100', playerId: '1', name: 'Alice', x: 30, y: 40, deathTime: 1_700_000_000 }],
+    );
 
-    await waitFor(() => expect(screen.queryByTitle('Alice died here')).not.toBeNull());
+    await waitFor(() => expect(screen.queryByTitle(/^Alice died here at /)).not.toBeNull());
     expect(screen.queryByText('Alice')).toBeNull();
   });
 });

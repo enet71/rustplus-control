@@ -187,7 +187,7 @@ export function MapView({ serverId, teamMapMembers, mapMarkers, deathMarkers }: 
                 className="map-marker-anchor"
                 key={death.id}
                 style={markerPosition(map, death)}
-                title={`${death.name} died here`}
+                title={`${death.name} died here at ${new Date(death.deathTime * 1000).toLocaleString()}`}
               >
                 <span className="map-marker death">
                   <Skull className="size-3" />

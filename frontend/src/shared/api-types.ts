@@ -32,7 +32,14 @@ export type DashboardState = {
   teamMapMembers: Array<
     MapPoint & { id: string; name: string; isOnline: boolean; avatarUrl?: string }
   >;
-  deathMarkers: Array<{ id: string; playerId: string; name: string; x: number; y: number }>;
+  deathMarkers: Array<{
+    id: string;
+    playerId: string;
+    name: string;
+    x: number;
+    y: number;
+    deathTime: number;
+  }>;
   config: {
     activeServerId?: string;
     servers: Array<{ id: string; name: string }>;
