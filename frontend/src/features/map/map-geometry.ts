@@ -51,7 +51,6 @@ const MONUMENT_LABELS: Record<string, string> = {
   supermarket_display_name: 'Supermarket',
   swamp_c_display_name: 'Swamp',
   trainyard_display_name: 'Train Yard',
-  underwater_lab_display_name: 'Underwater Lab',
   warehouse_display_name: 'Warehouse',
   water_treatment_plant_display_name: 'Water Treatment Plant',
   water_well_display_name: 'Water Well',
@@ -67,52 +66,69 @@ export function prettifyMonumentToken(token: string): string {
 }
 
 export function monumentLabel(token: string): string {
-  return MONUMENT_LABELS[token] ?? prettifyMonumentToken(token);
+  if (MONUMENT_LABELS[token]) return MONUMENT_LABELS[token];
+  // Underwater lab pieces report their raw prefab path instead of a short
+  // display-name token (e.g. ".../underwater_lab/underwater_lab_a.prefab" or
+  // ".../underwater-lab-base/module_900x900_2way_moonpool.prefab"), and every
+  // variant/module spawned still names the family somewhere in that path —
+  // so match anywhere in the string instead of requiring an exact token.
+  if (/underwater[-_]lab/i.test(token)) return 'Underwater Lab';
+  return prettifyMonumentToken(token);
 }
 
-/** Rust's underground train network — these get a distinct icon on the map. */
-export function isTunnelMonument(token: string): boolean {
-  return /tunnel/i.test(token);
+/** The underground train network's surface entrance — gets an icon instead of
+ *  a text label. The Military Tunnels monument is a separate, ordinary
+ *  monument and keeps its text label (see `MONUMENT_LABELS`). */
+export function isTunnelEntranceMonument(token: string): boolean {
+  return /train_tunnel_display_name/i.test(token) || isTunnelLinkMonument(token);
+}
+
+/** The tunnel-mouth segment linking two train tunnel entrances, as opposed to
+ *  a plain surface entrance — the two get different icons. */
+export function isTunnelLinkMonument(token: string): boolean {
+  return /train_tunnel_link_display_name/i.test(token);
 }
 
 export type MapMetrics = {
-  playableWidth: number;
-  playableHeight: number;
   columns: number;
-  aspectRatio: string;
-  imageStyle: { width: string; height: string; left: string; top: string };
 };
 
-/**
- * The map image includes an ocean border that is not part of the playable grid, so
- * the image is scaled up and offset until only the playable area fills the canvas.
- */
 export function mapMetrics(map: RustMap): MapMetrics {
-  const margin = Number(map.oceanMargin || 0);
-  const playableWidth = map.width - margin * 2;
-  const playableHeight = map.height - margin * 2;
-  return {
-    playableWidth,
-    playableHeight,
-    columns: Math.ceil(map.mapSize / GRID_CELL_SIZE),
-    aspectRatio: `${playableWidth} / ${playableHeight}`,
-    imageStyle: {
-      width: `${(map.width / playableWidth) * 100}%`,
-      height: `${(map.height / playableHeight) * 100}%`,
-      left: `${(-margin / playableWidth) * 100}%`,
-      top: `${(-margin / playableHeight) * 100}%`,
-    },
-  };
+  return { columns: Math.ceil(map.mapSize / GRID_CELL_SIZE) };
 }
 
-/** Rust map coordinates grow upwards; CSS `top` grows downwards. */
+/**
+ * The map image includes an ocean border around the playable `mapSize` square (this
+ * is where ocean-only monuments like oil rigs sit) — expressed as a fraction of the
+ * full image so the grid overlay can inset itself to the playable square within it.
+ */
+export function playableInset(map: RustMap): {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+} {
+  const marginX = Number(map.oceanMargin || 0) / map.width;
+  const marginY = Number(map.oceanMargin || 0) / map.height;
+  return { left: marginX, top: marginY, width: 1 - marginX * 2, height: 1 - marginY * 2 };
+}
+
+/** Rust map coordinates grow upwards; CSS `top` grows downwards. Points outside
+ *  the playable `[0, mapSize]` square (oil rigs and other ocean monuments) still
+ *  land correctly because the conversion is anchored to the full image, not just
+ *  the playable area. */
 export function markerPosition(
   map: RustMap,
   point: Pick<MapPoint, 'x' | 'y'>,
 ): { left: string; top: string } {
+  const margin = Number(map.oceanMargin || 0);
+  const playableWidth = map.width - margin * 2;
+  const playableHeight = map.height - margin * 2;
+  const pixelX = margin + (Number(point.x) / map.mapSize) * playableWidth;
+  const pixelY = margin + ((map.mapSize - Number(point.y)) / map.mapSize) * playableHeight;
   return {
-    left: `${(Number(point.x) / map.mapSize) * 100}%`,
-    top: `${((map.mapSize - Number(point.y)) / map.mapSize) * 100}%`,
+    left: `${(pixelX / map.width) * 100}%`,
+    top: `${(pixelY / map.height) * 100}%`,
   };
 }
 
@@ -193,19 +209,23 @@ export type PixelRect = { left: number; top: number; width: number; height: numb
  * A grid cell's on-screen box in container pixels. Rendered outside the zoomed
  * canvas so its border width and label size stay constant instead of growing with
  * `transform.scale` — only the box's position and size (i.e. where the lines fall)
- * track the zoom.
+ * track the zoom. `inset` (see `playableInset`) confines the grid to the playable
+ * square, since the canvas now also shows the ocean margin around it.
  */
 export function gridCellRect(
   index: number,
   columns: number,
   fitSize: Size,
   transform: MapTransform,
+  inset: { left: number; top: number; width: number; height: number },
 ): PixelRect {
-  const width = (fitSize.width * transform.scale) / columns;
-  const height = (fitSize.height * transform.scale) / columns;
+  const canvasWidth = fitSize.width * transform.scale;
+  const canvasHeight = fitSize.height * transform.scale;
+  const width = (canvasWidth * inset.width) / columns;
+  const height = (canvasHeight * inset.height) / columns;
   return {
-    left: transform.x + (index % columns) * width,
-    top: transform.y + Math.floor(index / columns) * height,
+    left: transform.x + canvasWidth * inset.left + (index % columns) * width,
+    top: transform.y + canvasHeight * inset.top + Math.floor(index / columns) * height,
     width,
     height,
   };

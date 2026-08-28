@@ -461,6 +461,12 @@ test('Rust+ map image is exposed with its coordinate metadata', () => {
               { token: 'trainyard_display_name', x: 1200, y: 800 },
               { token: '', x: 10, y: 10 },
               { token: 'no_coords' },
+              {
+                token:
+                  'assets/bundled/prefabs/autospawn/underwater-lab-base/module_900x900_2way_moonpool.prefab',
+                x: 900,
+                y: 900,
+              },
             ],
           },
         },

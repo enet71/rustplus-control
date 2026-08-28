@@ -45,17 +45,15 @@ export function EventsPanel({
       </p>
       <div className="mt-1 grid min-h-0 flex-1 content-start gap-1.5 overflow-y-auto pr-2">
         {events.map((event) => (
-          <p
-            key={event.id}
-            className="flex items-start justify-between gap-2.5 border-l-2 border-primary pl-2.5 text-sm text-muted-foreground"
-          >
-            <span className="min-w-0">
-              <strong className="text-foreground">{event.title}</strong> {event.body}
-            </span>
-            <time className="shrink-0 text-xs whitespace-nowrap text-muted-foreground">
-              {new Date(event.createdAt).toLocaleString()}
-            </time>
-          </p>
+          <div key={event.id} className="border-l-2 border-primary pl-2.5">
+            <div className="flex items-baseline justify-between gap-2.5">
+              <strong className="text-sm text-foreground">{event.title}</strong>
+              <time className="shrink-0 text-xs whitespace-nowrap text-muted-foreground">
+                {new Date(event.createdAt).toLocaleString()}
+              </time>
+            </div>
+            <p className="text-sm text-muted-foreground">{event.body}</p>
+          </div>
         ))}
       </div>
     </section>

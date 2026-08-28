@@ -8,11 +8,13 @@ import {
   gridCellLabel,
   gridCellRect,
   gridColumnLabel,
-  isTunnelMonument,
+  isTunnelEntranceMonument,
+  isTunnelLinkMonument,
   mapMetrics,
   markerKind,
   markerPosition,
   monumentLabel,
+  playableInset,
   prettifyMonumentToken,
   zoomMapTransform,
 } from './map-geometry';
@@ -47,15 +49,17 @@ describe('gridCellLabel', () => {
 });
 
 describe('gridCellRect', () => {
+  const fullInset = { left: 0, top: 0, width: 1, height: 1 };
+
   it('places cells in container pixels, tracking pan and zoom', () => {
     const fitSize = { width: 400, height: 400 };
-    expect(gridCellRect(0, 4, fitSize, { x: 0, y: 0, scale: 1 })).toEqual({
+    expect(gridCellRect(0, 4, fitSize, { x: 0, y: 0, scale: 1 }, fullInset)).toEqual({
       left: 0,
       top: 0,
       width: 100,
       height: 100,
     });
-    expect(gridCellRect(5, 4, fitSize, { x: 0, y: 0, scale: 1 })).toEqual({
+    expect(gridCellRect(5, 4, fitSize, { x: 0, y: 0, scale: 1 }, fullInset)).toEqual({
       left: 100,
       top: 100,
       width: 100,
@@ -65,48 +69,58 @@ describe('gridCellRect', () => {
 
   it('scales cell size and offsets position with the current zoom and pan', () => {
     const fitSize = { width: 400, height: 400 };
-    expect(gridCellRect(0, 4, fitSize, { x: 10, y: 20, scale: 2 })).toEqual({
+    expect(gridCellRect(0, 4, fitSize, { x: 10, y: 20, scale: 2 }, fullInset)).toEqual({
       left: 10,
       top: 20,
       width: 200,
       height: 200,
     });
   });
+
+  it('confines the grid to the playable square when the canvas also shows the ocean margin', () => {
+    const fitSize = { width: 400, height: 400 };
+    const inset = { left: 0.1, top: 0.1, width: 0.8, height: 0.8 };
+    expect(gridCellRect(0, 4, fitSize, { x: 0, y: 0, scale: 1 }, inset)).toEqual({
+      left: 40,
+      top: 40,
+      width: 80,
+      height: 80,
+    });
+  });
 });
 
 describe('mapMetrics', () => {
-  it('scales and offsets the image so only the playable area fills the canvas', () => {
-    const metrics = mapMetrics(map);
-
-    expect(metrics.playableWidth).toBe(1500);
-    expect(metrics.playableHeight).toBe(1500);
-    expect(metrics.aspectRatio).toBe('1500 / 1500');
-    expect(metrics.imageStyle).toEqual({
-      width: `${(2000 / 1500) * 100}%`,
-      height: `${(2000 / 1500) * 100}%`,
-      left: `${(-250 / 1500) * 100}%`,
-      top: `${(-250 / 1500) * 100}%`,
-    });
-  });
-
-  it('covers the whole map when there is no ocean margin', () => {
-    const metrics = mapMetrics({ ...map, oceanMargin: 0 });
-
-    expect(metrics.playableWidth).toBe(2000);
-    expect(metrics.imageStyle).toEqual({ width: '100%', height: '100%', left: '0%', top: '0%' });
-  });
-
   it('derives one grid column per 150 map units', () => {
     expect(mapMetrics({ ...map, mapSize: 3000 }).columns).toBe(20);
     expect(mapMetrics({ ...map, mapSize: 3050 }).columns).toBe(21);
   });
 });
 
+describe('playableInset', () => {
+  it('expresses the ocean margin as a fraction of the full image', () => {
+    expect(playableInset(map)).toEqual({ left: 0.125, top: 0.125, width: 0.75, height: 0.75 });
+  });
+
+  it('covers the whole image when there is no ocean margin', () => {
+    expect(playableInset({ ...map, oceanMargin: 0 })).toEqual({
+      left: 0,
+      top: 0,
+      width: 1,
+      height: 1,
+    });
+  });
+});
+
 describe('markerPosition', () => {
-  it('flips the vertical axis because Rust coordinates grow upwards', () => {
-    expect(markerPosition(map, { x: 0, y: 3000 })).toEqual({ left: '0%', top: '0%' });
-    expect(markerPosition(map, { x: 3000, y: 0 })).toEqual({ left: '100%', top: '100%' });
+  it('flips the vertical axis because Rust coordinates grow upwards, anchored to the full image', () => {
+    expect(markerPosition(map, { x: 0, y: 3000 })).toEqual({ left: '12.5%', top: '12.5%' });
+    expect(markerPosition(map, { x: 3000, y: 0 })).toEqual({ left: '87.5%', top: '87.5%' });
     expect(markerPosition(map, { x: 1500, y: 1500 })).toEqual({ left: '50%', top: '50%' });
+  });
+
+  it('places ocean monuments (e.g. oil rigs) outside the playable square within the ocean margin', () => {
+    expect(markerPosition(map, { x: -500, y: 1500 })).toEqual({ left: '0%', top: '50%' });
+    expect(markerPosition(map, { x: 3500, y: 1500 })).toEqual({ left: '100%', top: '50%' });
   });
 });
 
@@ -129,6 +143,19 @@ describe('monumentLabel', () => {
   it('falls back to a prettified token for unknown ones', () => {
     expect(monumentLabel('some_new_monument_display_name')).toBe('Some New Monument');
   });
+
+  it('labels every underwater lab variant, including raw prefab-path tokens', () => {
+    expect(
+      monumentLabel(
+        'assets/bundled/prefabs/autospawn/monument/underwater_lab/underwater_lab_a.prefab',
+      ),
+    ).toBe('Underwater Lab');
+    expect(
+      monumentLabel(
+        'assets/bundled/prefabs/autospawn/underwater-lab-base/module_900x900_2way_moonpool.prefab',
+      ),
+    ).toBe('Underwater Lab');
+  });
 });
 
 describe('prettifyMonumentToken', () => {
@@ -139,11 +166,18 @@ describe('prettifyMonumentToken', () => {
   });
 });
 
-describe('isTunnelMonument', () => {
-  it('flags tokens mentioning a tunnel, case-insensitively', () => {
-    expect(isTunnelMonument('military_tunnel_1')).toBe(true);
-    expect(isTunnelMonument('Underground_Tunnel_Entrance')).toBe(true);
-    expect(isTunnelMonument('trainyard_display_name')).toBe(false);
+describe('isTunnelEntranceMonument', () => {
+  it('flags a train tunnel entrance or link, not the unrelated Military Tunnels monument', () => {
+    expect(isTunnelEntranceMonument('train_tunnel_display_name')).toBe(true);
+    expect(isTunnelEntranceMonument('train_tunnel_link_display_name')).toBe(true);
+    expect(isTunnelEntranceMonument('military_tunnel_1')).toBe(false);
+  });
+});
+
+describe('isTunnelLinkMonument', () => {
+  it('flags only the link variant, not the plain entrance', () => {
+    expect(isTunnelLinkMonument('train_tunnel_link_display_name')).toBe(true);
+    expect(isTunnelLinkMonument('train_tunnel_display_name')).toBe(false);
   });
 });
 

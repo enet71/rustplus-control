@@ -71,6 +71,15 @@ describe('MapView', () => {
     expect(screen.queryByText('Team')).not.toBeNull();
   });
 
+  it('drops the outer right/bottom grid border, keeping inner cell borders', async () => {
+    renderMap(readyMapResponse);
+
+    await waitFor(() => expect(screen.queryByText('A1')).not.toBeNull());
+    expect(screen.getByText('A1').className).not.toMatch(/is-last-column|is-last-row/);
+    expect(screen.getByText('B2').className).toMatch(/is-last-column/);
+    expect(screen.getByText('B2').className).toMatch(/is-last-row/);
+  });
+
   it('shows sleeping (offline) teammates too, marked differently from online ones', async () => {
     renderMap(readyMapResponse, [
       { id: '1', name: 'Awake', x: 10, y: 10, isOnline: true },
@@ -96,6 +105,19 @@ describe('MapView', () => {
 
     await waitFor(() => expect(screen.queryByText('Train Yard')).not.toBeNull());
     expect(screen.queryByText('Monuments')).not.toBeNull();
+  });
+
+  it('shows a train tunnel entrance as an icon, not a text label', async () => {
+    renderMap(() => readyMapResponse([{ token: 'train_tunnel_display_name', x: 50, y: 50 }]));
+
+    await waitFor(() => expect(screen.queryByText('Monuments')).not.toBeNull());
+    expect(screen.queryByText('Train Tunnel')).toBeNull();
+  });
+
+  it('labels the unrelated Military Tunnels monument as text, not an icon', async () => {
+    renderMap(() => readyMapResponse([{ token: 'military_tunnel_1', x: 50, y: 50 }]));
+
+    await waitFor(() => expect(screen.queryByText('Military Tunnels')).not.toBeNull());
   });
 
   it('shows recent death markers without a name label, with the death time on hover', async () => {

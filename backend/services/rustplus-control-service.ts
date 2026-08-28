@@ -1034,7 +1034,15 @@ export class RustplusControlService {
                 }))
                 .filter(
                   (monument: RustMonument) =>
-                    monument.token && Number.isFinite(monument.x) && Number.isFinite(monument.y),
+                    monument.token &&
+                    Number.isFinite(monument.x) &&
+                    Number.isFinite(monument.y) &&
+                    // Underwater labs report one monument per room module (e.g.
+                    // ".../underwater-lab-base/module_900x900_2way_moonpool.prefab")
+                    // in addition to the lab's own entrance token
+                    // (".../monument/underwater_lab/underwater_lab_a.prefab"),
+                    // which duplicated the "Underwater Lab" label many times over.
+                    !/underwater-lab-base/i.test(monument.token),
                 )
             : [];
           this.map = {

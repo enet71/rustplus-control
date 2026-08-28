@@ -22,13 +22,13 @@
 }
 .map-canvas > img {
   position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   display: block;
   max-width: none;
   pointer-events: none;
-}
-.map-marker-layer {
-  position: absolute;
-  inset: 0;
 }
 /* Sits outside `.map-canvas` (unscaled) so line width and label text stay a
    constant size; each cell is positioned in container pixels instead, see
@@ -39,19 +39,37 @@
   overflow: hidden;
   pointer-events: none;
 }
+/* A sibling of `.map-canvas` sharing its own width/height/transform (applied
+   inline) instead of living inside it, and rendered after `.map-grid-overlay`
+   in the DOM, so markers/labels always paint above the grid lines. */
+.map-marker-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  /* Establishes a stacking context so `.map-marker-anchor.monument`'s
+     `z-index: -1` only sinks monuments below their sibling markers here,
+     instead of escaping to compete with unrelated page content. */
+  z-index: 0;
+}
 .map-grid-cell {
   position: absolute;
   display: grid;
   box-sizing: border-box;
   place-items: start end;
-  border-right: 1px solid rgba(225, 237, 231, 0.28);
-  border-bottom: 1px solid rgba(225, 237, 231, 0.28);
+  border-right: 1px solid rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
   padding: 3px;
-  color: rgba(241, 247, 243, 0.82);
+  color: #000;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1;
-  text-shadow: 0 1px 2px #000;
+}
+.map-grid-cell.is-last-column {
+  border-right: none;
+}
+.map-grid-cell.is-last-row {
+  border-bottom: none;
 }
 .map-marker-anchor {
   position: absolute;
@@ -134,21 +152,21 @@
   z-index: -1;
   pointer-events: none;
 }
-.map-marker.monument {
+.map-marker.monument-tunnel {
   display: flex;
-  width: 18px;
-  height: 18px;
+  width: 26px;
+  height: 26px;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--foreground) 25%, var(--card));
-  color: var(--foreground);
-  border-color: color-mix(in srgb, var(--background) 70%, transparent);
+  background: #fff;
+  color: #000;
+  border: none;
 }
 .map-marker-label.monument {
-  padding: 0 4px;
-  background: color-mix(in srgb, var(--background) 55%, transparent);
-  color: var(--muted-foreground);
-  font-size: 9px;
+  padding: 0;
+  background: none;
+  color: #111;
+  font-size: 15px;
   font-weight: 500;
 }
 .map-legend {

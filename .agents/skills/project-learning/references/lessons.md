@@ -2,6 +2,16 @@
 
 Use this file for confirmed, project-specific lessons. Add entries in reverse chronological order.
 
+## 2026-08-28 - A negative `z-index` with no local stacking context escapes to the whole page
+
+**Context:** `frontend/src/styles/map.css`, `.map-marker-anchor.monument { z-index: -1; }` — intended to paint monument markers/labels behind team/event/death markers on the map, inside `.map-marker-layer`.
+
+**What went wrong:** `.map-marker-layer` (the shared parent) had `position: absolute` but no `z-index`, so it never established its own stacking context. A child's `z-index: -1` then compares against the nearest ancestor that *does* establish one — which turned out to be the document root, not `.map-marker-layer`. The monument markers ended up painted behind unrelated page chrome (sidebar/card backgrounds), i.e. invisible, even though they were correctly present in the DOM (frontend tests only assert DOM text presence, so they stayed green throughout).
+
+**Required behavior:** Whenever a child needs a negative (or otherwise carefully ordered) `z-index` to stack below its siblings, give the shared parent an explicit `z-index` (e.g. `0`) alongside its `position` so it creates a local stacking context — otherwise the child's `z-index` is resolved against a far more distant ancestor than intended. This class of bug is invisible to jsdom-based tests, which don't do real paint/stacking, so it only shows up by actually looking at the rendered page.
+
+**Evidence:** User reported "надписей на карте не появилось" (labels didn't appear on the map) after monument labels had been implemented and unit-tested; fixed by adding `z-index: 0` to `.map-marker-layer`.
+
 ## 2026-08-28 - A mount-only ref effect misses a node that isn't there on the first render
 
 **Context:** `frontend/src/features/map/map-view.tsx`, wiring a `ResizeObserver` and a native `wheel` listener to the `.rust-map` container via `useRef` + `useEffect(() => { const el = ref.current; if (!el) return; ... }, [])`.

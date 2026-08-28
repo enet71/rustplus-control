@@ -6,7 +6,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { MapPin, Moon, Skull, TrainFrontTunnel, User } from 'lucide-react';
+import { Moon, Skull, Train, TrainFrontTunnel, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardState } from '../../shared/api-types';
 import {
@@ -15,11 +15,13 @@ import {
   fitMapSize,
   gridCellLabel,
   gridCellRect,
-  isTunnelMonument,
+  isTunnelEntranceMonument,
+  isTunnelLinkMonument,
   mapMetrics,
   markerKind,
   markerPosition,
   monumentLabel,
+  playableInset,
   zoomMapTransform,
   type MapTransform,
   type Size,
@@ -55,8 +57,7 @@ export function MapView({ serverId, teamMapMembers, mapMarkers, deathMarkers }: 
   const [isPanning, setIsPanning] = useState(false);
   const [resetKey, setResetKey] = useState('');
 
-  const earlyMetrics = map ? mapMetrics(map) : null;
-  const aspect = earlyMetrics ? earlyMetrics.playableWidth / earlyMetrics.playableHeight : 1;
+  const aspect = map ? map.width / map.height : 1;
   // Memoized so its identity only changes when the inputs genuinely do — the wheel
   // effect below depends on it, and an unstable reference would re-attach the
   // listener on every render.
@@ -132,6 +133,8 @@ export function MapView({ serverId, teamMapMembers, mapMarkers, deathMarkers }: 
 
   const metrics = mapMetrics(map);
   const cells = metrics.columns * metrics.columns;
+  const inset = playableInset(map);
+  const canvasTransform = `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`;
 
   return (
     <section className="flex min-h-0 flex-1 flex-col">
@@ -145,82 +148,25 @@ export function MapView({ serverId, teamMapMembers, mapMarkers, deathMarkers }: 
       >
         <div
           className="map-canvas"
-          style={{
-            width: fit.width,
-            height: fit.height,
-            transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
-          }}
+          style={{ width: fit.width, height: fit.height, transform: canvasTransform }}
         >
-          <img src={map.image} alt="Rust server map" style={metrics.imageStyle} />
-          <div className="map-marker-layer" style={{ '--zoom': transform.scale } as CSSProperties}>
-            {teamMapMembers.map((member) => (
-              <span
-                className="map-marker-anchor"
-                key={member.id}
-                style={markerPosition(map, member)}
-                title={member.isOnline ? member.name : `${member.name} (sleeping)`}
-              >
-                <span className={cn('map-marker team', !member.isOnline && 'is-sleeping')}>
-                  {member.avatarUrl ? (
-                    <img src={member.avatarUrl} alt="" />
-                  ) : member.isOnline ? (
-                    <User className="size-4" />
-                  ) : (
-                    <Moon className="size-4" />
-                  )}
-                </span>
-                {member.isOnline && <span className="map-marker-label">{member.name}</span>}
-              </span>
-            ))}
-            {mapMarkers.map((marker) => (
-              <span
-                className="map-marker-anchor"
-                key={marker.id}
-                style={markerPosition(map, marker)}
-                title={marker.name || 'Map marker'}
-              >
-                <span className={`map-marker ${markerKind(marker.type)}`} />
-              </span>
-            ))}
-            {deathMarkers.map((death) => (
-              <span
-                className="map-marker-anchor"
-                key={death.id}
-                style={markerPosition(map, death)}
-                title={`${death.name} died here at ${new Date(death.deathTime * 1000).toLocaleString()}`}
-              >
-                <span className="map-marker death">
-                  <Skull className="size-3" />
-                </span>
-              </span>
-            ))}
-            {(map.monuments || []).map((monument, index) => (
-              <span
-                className="map-marker-anchor monument"
-                key={`${monument.token}:${index}`}
-                style={markerPosition(map, monument)}
-              >
-                <span className="map-marker monument">
-                  {isTunnelMonument(monument.token) ? (
-                    <TrainFrontTunnel className="size-3" />
-                  ) : (
-                    <MapPin className="size-3" />
-                  )}
-                </span>
-                <span className="map-marker-label monument">{monumentLabel(monument.token)}</span>
-              </span>
-            ))}
-          </div>
+          <img src={map.image} alt="Rust server map" />
         </div>
         {/* Rendered outside the zoomed canvas so line width and label size stay
             constant instead of growing with the zoom level; each cell's own
             position/size is computed in container pixels to still track pan/zoom. */}
         <div className="map-grid-overlay">
           {Array.from({ length: cells }, (_, index) => {
-            const rect = gridCellRect(index, metrics.columns, fit, transform);
+            const rect = gridCellRect(index, metrics.columns, fit, transform, inset);
+            const isLastColumn = index % metrics.columns === metrics.columns - 1;
+            const isLastRow = Math.floor(index / metrics.columns) === metrics.columns - 1;
             return (
               <span
-                className="map-grid-cell"
+                className={cn(
+                  'map-grid-cell',
+                  isLastColumn && 'is-last-column',
+                  isLastRow && 'is-last-row',
+                )}
                 key={index}
                 style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
               >
@@ -228,6 +174,81 @@ export function MapView({ serverId, teamMapMembers, mapMarkers, deathMarkers }: 
               </span>
             );
           })}
+        </div>
+        {/* A separate layer sharing the canvas's own transform (rather than living
+            inside it) so markers/labels paint above the grid overlay instead of
+            being trapped underneath it by DOM order. */}
+        <div
+          className="map-marker-layer"
+          style={
+            {
+              width: fit.width,
+              height: fit.height,
+              transform: canvasTransform,
+              '--zoom': transform.scale,
+            } as CSSProperties
+          }
+        >
+          {teamMapMembers.map((member) => (
+            <span
+              className="map-marker-anchor"
+              key={member.id}
+              style={markerPosition(map, member)}
+              title={member.isOnline ? member.name : `${member.name} (sleeping)`}
+            >
+              <span className={cn('map-marker team', !member.isOnline && 'is-sleeping')}>
+                {member.avatarUrl ? (
+                  <img src={member.avatarUrl} alt="" />
+                ) : member.isOnline ? (
+                  <User className="size-4" />
+                ) : (
+                  <Moon className="size-4" />
+                )}
+              </span>
+              {member.isOnline && <span className="map-marker-label">{member.name}</span>}
+            </span>
+          ))}
+          {mapMarkers.map((marker) => (
+            <span
+              className="map-marker-anchor"
+              key={marker.id}
+              style={markerPosition(map, marker)}
+              title={marker.name || 'Map marker'}
+            >
+              <span className={`map-marker ${markerKind(marker.type)}`} />
+            </span>
+          ))}
+          {deathMarkers.map((death) => (
+            <span
+              className="map-marker-anchor"
+              key={death.id}
+              style={markerPosition(map, death)}
+              title={`${death.name} died here at ${new Date(death.deathTime * 1000).toLocaleString()}`}
+            >
+              <span className="map-marker death">
+                <Skull className="size-3" />
+              </span>
+            </span>
+          ))}
+          {(map.monuments || []).map((monument, index) => (
+            <span
+              className="map-marker-anchor monument"
+              key={`${monument.token}:${index}`}
+              style={markerPosition(map, monument)}
+            >
+              {isTunnelEntranceMonument(monument.token) ? (
+                <span className="map-marker monument-tunnel">
+                  {isTunnelLinkMonument(monument.token) ? (
+                    <TrainFrontTunnel className="size-5" />
+                  ) : (
+                    <Train className="size-5" />
+                  )}
+                </span>
+              ) : (
+                <span className="map-marker-label monument">{monumentLabel(monument.token)}</span>
+              )}
+            </span>
+          ))}
         </div>
       </div>
       <div className="map-legend">
