@@ -60,7 +60,7 @@ describe('DashboardPage', () => {
 
     await waitFor(() => expect(screen.queryByText('Connected to Test server')).not.toBeNull());
     expect(screen.queryByRole('alert')).toBeNull();
-    expect((screen.getByLabelText('Active server') as HTMLSelectElement).value).toBe('server-1');
+    expect(screen.getByLabelText('Active server').textContent).toContain('Test server');
   });
 
   it('offers the pairing dialog for the first pending pairing', async () => {

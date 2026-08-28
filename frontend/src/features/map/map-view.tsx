@@ -10,11 +10,8 @@ type MapViewProps = {
 
 function MapPlaceholder({ message }: { message: string }) {
   return (
-    <section className="controls">
-      <div className="row-title">
-        <h2>Map</h2>
-        <p className="hint">{message}</p>
-      </div>
+    <section>
+      <p className="text-sm text-muted-foreground">{message}</p>
     </section>
   );
 }
@@ -32,10 +29,7 @@ export function MapView({ serverId, teamMapMembers, mapMarkers }: MapViewProps) 
   const cells = metrics.columns * metrics.columns;
 
   return (
-    <section className="controls">
-      <div className="row-title">
-        <h2>Map</h2>
-      </div>
+    <section className="flex min-h-0 flex-1 flex-col">
       <div className="rust-map">
         <div className="map-canvas" style={{ aspectRatio: metrics.aspectRatio }}>
           <img src={map.image} alt="Rust server map" style={metrics.imageStyle} />

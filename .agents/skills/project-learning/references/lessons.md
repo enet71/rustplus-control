@@ -2,6 +2,18 @@
 
 Use this file for confirmed, project-specific lessons. Add entries in reverse chronological order.
 
+## 2026-08-28 - Never call a `<dialog>`'s close() from a mount effect's own cleanup
+
+**Context:** `frontend/src/shared/ui/modal.tsx`, wrapping `<dialog>` to call `showModal()` on mount and forward the native `close` event to a React `onClose` prop. Used by all 5 dialogs in the app (settings, discord, device, group, pairing).
+
+**What went wrong (two attempts, both confirmed wrong by the user before the fix that stuck):**
+1. First version called `dialog.close()` unconditionally in the effect cleanup while the `close` listener was still attached, with the listener wired through JSX's `onClose` prop. User: "Модалки вообще не работают" (nothing opened / closed itself immediately).
+2. Second attempt kept the `close()` call in cleanup but switched to a manually managed `addEventListener`/`removeEventListener` pair, removed *before* calling `close()`, reasoning the queued native `close` event from React StrictMode's dev-mode mount/cleanup/mount double-invoke was reaching a still-attached listener. User: "не исправилось, модалка так и не появляется" (still doesn't appear at all) — so that ordering fix was not the (whole) story; `showModal()` throws `InvalidStateError` if the dialog already has an `open` attribute, and something in the close()-then-reopen sequence on the same node was leaving it unable to reopen.
+
+**Required behavior:** Don't call `close()` on a `<dialog>` from the mount effect's cleanup at all — removing the `<dialog>` node from the document (a real unmount) implicitly drops it from the top layer on its own, so cleanup only needs to detach listeners. Guard the open call with `if (!dialog.open)` so the effect is safe to run twice on the *same* node without an intervening close, which is exactly what StrictMode's double-invoke does (the DOM node persists across the simulated remount; only the JS effect functions run twice).
+
+**Evidence:** Two consecutive user reports that the dialog didn't work after each attempted fix. jsdom's `HTMLDialogElement` has no `showModal`/`close` implementation (confirmed via `node_modules/jsdom/lib/jsdom/living/nodes/HTMLDialogElement-impl.js`), so this class of bug is invisible to the frontend test suite regardless of which cleanup approach is used — real-browser (or user) verification is required, a unit test cannot substitute for it here.
+
 ## 2026-08-28 - Retry map loading on a Rust+ rate limit, like device state loading does
 
 **Context:** `loadMap` in `backend/services/rustplus-control-service.ts`, called once from `startPollingListeners` on connect.

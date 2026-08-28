@@ -2,6 +2,9 @@ import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { ROUTES } from '../../app/routes';
 import { saveAccessToken, useAccessToken } from '../../shared/session';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { verifyAccessToken } from './auth-api';
 
 export function LoginPage() {
@@ -32,26 +35,29 @@ export function LoginPage() {
   if (storedToken) return <Navigate to={ROUTES.dashboard} replace />;
 
   return (
-    <main className="login-main">
-      <p className="eyebrow">RUST+ COMPANION</p>
-      <h1>Electrical control</h1>
-      <p className="login-copy">Enter the access key configured for this Rust+ Control server.</p>
-      <form className="stacked-form" onSubmit={submit}>
-        <label>
-          Access key
-          <input
+    <main className="mx-auto flex min-h-screen w-full max-w-[420px] flex-col justify-center px-5 py-10">
+      <p className="text-xs tracking-[0.15em] text-muted-foreground">RUST+ COMPANION</p>
+      <h1 className="mt-1.5 text-3xl font-bold">Electrical control</h1>
+      <p className="my-5 leading-relaxed text-muted-foreground">
+        Enter the access key configured for this Rust+ Control server.
+      </p>
+      <form className="grid gap-4" onSubmit={submit}>
+        <div className="grid gap-1.5">
+          <Label htmlFor="access-key">Access key</Label>
+          <Input
+            id="access-key"
             type="password"
             value={token}
             onChange={(event) => setToken(event.target.value)}
             autoComplete="current-password"
             required
           />
-        </label>
-        <button className="login-button" type="submit" disabled={submitting}>
+        </div>
+        <Button size="lg" type="submit" disabled={submitting} className="w-full">
           Sign in
-        </button>
+        </Button>
       </form>
-      <p className="hint" role="status">
+      <p className="mt-3.5 min-h-[18px] text-center text-sm text-muted-foreground" role="status">
         {status}
       </p>
     </main>

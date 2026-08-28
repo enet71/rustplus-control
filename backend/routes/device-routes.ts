@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { deviceBackupInput, groupInput, isValidationError } from '../validation';
+import { deviceBackupInput, groupInput, isValidationError, reorderInput } from '../validation';
 import { RustplusControlService } from '../services/rustplus-control-service';
 
 export function createDeviceRouter(control: RustplusControlService): Router {
@@ -81,16 +81,14 @@ export function createDeviceRouter(control: RustplusControlService): Router {
     return response.json({ ok: true });
   });
 
-  router.post('/items/:type/:id/move', (request, response) => {
-    const type = request.params.type;
-    const direction = request.body?.direction;
-    if ((type !== 'group' && type !== 'device') || (direction !== -1 && direction !== 1))
-      return response.status(400).json({ error: 'type and direction are invalid.' });
-    if (!control.getActiveProfile())
-      return response.status(404).json({ error: 'No active server.' });
-    return control.moveItem(type, request.params.id, direction)
+  router.post('/items/reorder', (request, response) => {
+    const profile = control.getActiveProfile();
+    if (!profile) return response.status(404).json({ error: 'No active server.' });
+    const order = reorderInput(request.body, profile);
+    if (isValidationError(order)) return response.status(400).json({ error: order.error });
+    return control.reorderTopLevel(order)
       ? response.json({ ok: true })
-      : response.status(409).json({ error: 'Item cannot be moved further.' });
+      : response.status(404).json({ error: 'No active server.' });
   });
 
   return router;

@@ -1,4 +1,14 @@
 import { useState, type FormEvent } from 'react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import type { Device } from '../../shared/api-types';
 import type { DeviceMutations } from './use-devices';
 
@@ -23,32 +33,37 @@ export function DeviceDialog({ device, mutations, close }: DeviceDialogProps) {
   };
 
   return (
-    <dialog open>
-      <form className="stacked-form" onSubmit={submit}>
-        <h2>Rename device</h2>
-        <label>
-          Name
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            required
-            maxLength={80}
-          />
-        </label>
-        <div className="dialog-actions">
-          <button
-            type="button"
-            className="secondary"
-            disabled={renameDevice.isPending}
-            onClick={close}
-          >
-            Cancel
-          </button>
-          <button type="submit" disabled={renameDevice.isPending}>
-            Save
-          </button>
-        </div>
-      </form>
-    </dialog>
+    <Dialog open onOpenChange={(open) => !open && close()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Rename device</DialogTitle>
+        </DialogHeader>
+        <form className="grid gap-4" onSubmit={submit}>
+          <div className="grid gap-1.5">
+            <Label htmlFor="device-name">Name</Label>
+            <Input
+              id="device-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              required
+              maxLength={80}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={renameDevice.isPending}
+              onClick={close}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={renameDevice.isPending}>
+              Save
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

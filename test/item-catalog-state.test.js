@@ -53,6 +53,44 @@ test('state uses catalog icons for devices and storage items', () => {
   assert.deepEqual(state.storageStates.storage.items[0].item, catalogItem);
 });
 
+test('reorderTopLevel assigns sortOrder from the given order', () => {
+  const repository = {
+    migrateLegacyFcmConfig() {},
+    loadConfig() {
+      return {
+        activeServerId: 'server',
+        servers: [
+          {
+            id: 'server',
+            name: 'Server',
+            server: {},
+            devices: [
+              { entityId: 'a', name: 'A', type: 'switch' },
+              { entityId: 'b', name: 'B', type: 'switch' },
+            ],
+            groups: [{ id: 'g1', name: 'Group', deviceIds: ['a'] }],
+          },
+        ],
+      };
+    },
+    hasFcmConfig() {
+      return false;
+    },
+    saveConfig() {},
+  };
+  const control = new RustplusControlService(repository, process.cwd(), false);
+
+  const ok = control.reorderTopLevel([
+    { type: 'device', id: 'b' },
+    { type: 'group', id: 'g1' },
+  ]);
+
+  assert.equal(ok, true);
+  const state = control.getState();
+  assert.equal(state.config.devices.find((device) => device.entityId === 'b').sortOrder, 0);
+  assert.equal(state.config.groups.find((group) => group.id === 'g1').sortOrder, 1);
+});
+
 test('storage monitor refreshes after a pipe change pulse without items', () => {
   const repository = {
     migrateLegacyFcmConfig() {},

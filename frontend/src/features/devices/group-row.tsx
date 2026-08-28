@@ -1,6 +1,10 @@
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { ChevronDown, GripVertical } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { Toggle } from '../../shared/ui/toggle';
 import type { Device, DeviceGroup } from '../../shared/api-types';
-import type { MoveDirection } from './use-devices';
 
 type GroupRowProps = {
   group: DeviceGroup;
@@ -8,13 +12,10 @@ type GroupRowProps = {
   switchCount: number;
   enabled: boolean;
   collapsed: boolean;
-  position: number;
-  count: number;
   pending: boolean;
   onToggle: (group: DeviceGroup, enabled: boolean) => void;
   onToggleCollapsed: (groupId: string) => void;
   onEdit: (group: DeviceGroup) => void;
-  onMove: (group: DeviceGroup, direction: MoveDirection) => void;
 };
 
 export function GroupRow({
@@ -23,54 +24,59 @@ export function GroupRow({
   switchCount,
   enabled,
   collapsed,
-  position,
-  count,
   pending,
   onToggle,
   onToggleCollapsed,
   onEdit,
-  onMove,
 }: GroupRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: group.id,
+  });
   return (
-    <article className="control-row group-row">
-      <div className="control-info">
-        <h3>{group.name}</h3>
-        <p>
+    <article
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        'flex items-center gap-4 rounded-lg border border-border border-l-[3px] bg-card p-3.5 transition-colors hover:bg-muted',
+        switchCount === 0
+          ? 'border-l-border'
+          : enabled
+            ? 'border-l-success'
+            : 'border-l-destructive',
+        isDragging && 'opacity-60',
+      )}
+    >
+      <button
+        type="button"
+        className="flex size-6 shrink-0 cursor-grab touch-none items-center justify-center text-muted-foreground hover:text-foreground active:cursor-grabbing"
+        aria-label={`Reorder ${group.name}`}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="size-4" />
+      </button>
+      <div className="min-w-0 flex-1">
+        <h3 className="font-semibold">{group.name}</h3>
+        <p className="mt-1.5 text-sm text-muted-foreground">
           {members.length} device{members.length === 1 ? '' : 's'}
         </p>
       </div>
-      <div className="control-actions group-actions">
-        <button className="secondary edit-group" onClick={() => onEdit(group)}>
+      <div className="flex shrink-0 items-center gap-2">
+        <Button variant="secondary" onClick={() => onEdit(group)}>
           Edit
-        </button>
-        <button
-          className={`collapse-group ${collapsed ? 'is-collapsed' : ''}`}
+        </Button>
+        <Button
+          variant="secondary"
+          size="icon"
           onClick={() => onToggleCollapsed(group.id)}
           aria-label="Collapse group"
           aria-expanded={!collapsed}
         >
-          <span className="collapse-icon" />
-        </button>
-        <button
-          className="sort-button move-up"
-          disabled={position === 0}
-          onClick={() => onMove(group, -1)}
-          aria-label="Move up"
-        >
-          &#8593;
-        </button>
-        <button
-          className="sort-button move-down"
-          disabled={position === count - 1}
-          onClick={() => onMove(group, 1)}
-          aria-label="Move down"
-        >
-          &#8595;
-        </button>
+          <ChevronDown className={cn('size-4 transition-transform', collapsed && '-rotate-90')} />
+        </Button>
         {switchCount > 0 && (
           <Toggle
             name={group.name}
-            className="group-switch"
             enabled={enabled}
             disabled={pending}
             onClick={() => onToggle(group, !enabled)}

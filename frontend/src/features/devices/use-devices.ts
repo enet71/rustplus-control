@@ -2,8 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage, jsonBody } from '../../shared/http';
 import { queryKeys } from '../../shared/query-keys';
 
-export type MoveDirection = -1 | 1;
-export type MoveTarget = { type: 'device' | 'group'; id: string; direction: MoveDirection };
+export type OrderEntry = { type: 'group' | 'device'; id: string };
 export type GroupDraft = { id?: string; name: string; deviceIds: string[] };
 
 /**
@@ -56,11 +55,11 @@ export function useDeviceMutations(report: (message: string) => void) {
     onError,
   });
 
-  const moveItem = useMutation({
-    mutationFn: ({ type, id, direction }: MoveTarget) =>
-      api(`/api/items/${encodeURIComponent(type)}/${encodeURIComponent(id)}/move`, {
+  const reorderItems = useMutation({
+    mutationFn: (order: OrderEntry[]) =>
+      api('/api/items/reorder', {
         method: 'POST',
-        ...jsonBody({ direction }),
+        ...jsonBody({ order }),
       }),
     onSuccess,
     onError,
@@ -71,7 +70,7 @@ export function useDeviceMutations(report: (message: string) => void) {
     setGroupEnabled,
     renameDevice,
     saveGroup,
-    moveItem,
+    reorderItems,
     isDevicePending: (entityId: string) =>
       setDeviceEnabled.isPending && setDeviceEnabled.variables?.entityId === entityId,
     isGroupPending: (groupId: string) =>

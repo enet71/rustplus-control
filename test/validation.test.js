@@ -1,6 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { deviceBackupInput, groupInput, settingsInput } = require('../dist/backend/validation');
+const {
+  deviceBackupInput,
+  groupInput,
+  reorderInput,
+  settingsInput,
+} = require('../dist/backend/validation');
 
 test('settingsInput accepts complete server and FCM settings', () => {
   const result = settingsInput({
@@ -85,6 +90,63 @@ test('groupInput accepts all device types and prevents duplicate membership', ()
     name: 'Alarms',
     deviceIds: ['2'],
   });
+});
+
+test('reorderInput accepts a permutation of the current top-level items only', () => {
+  const profile = {
+    id: 'server',
+    name: 'Server',
+    server: {},
+    devices: [
+      { entityId: '1', name: 'Door', type: 'switch' },
+      { entityId: '2', name: 'Grouped', type: 'switch' },
+      { entityId: '3', name: 'Ungrouped', type: 'alarm' },
+    ],
+    groups: [{ id: 'g1', name: 'Base', deviceIds: ['2'] }],
+  };
+
+  assert.deepEqual(
+    reorderInput(
+      {
+        order: [
+          { type: 'device', id: '3' },
+          { type: 'group', id: 'g1' },
+          { type: 'device', id: '1' },
+        ],
+      },
+      profile,
+    ),
+    [
+      { type: 'device', id: '3' },
+      { type: 'group', id: 'g1' },
+      { type: 'device', id: '1' },
+    ],
+  );
+  assert.deepEqual(
+    reorderInput(
+      {
+        order: [
+          { type: 'group', id: 'g1' },
+          { type: 'device', id: '1' },
+        ],
+      },
+      profile,
+    ),
+    { error: 'order must contain exactly the current top-level items.' },
+  );
+  assert.deepEqual(
+    reorderInput(
+      {
+        order: [
+          { type: 'device', id: '2' },
+          { type: 'group', id: 'g1' },
+          { type: 'device', id: '1' },
+        ],
+      },
+      profile,
+    ),
+    { error: 'order must contain exactly the current top-level items.' },
+  );
 });
 
 test('deviceBackupInput accepts groups and rejects repeated membership', () => {

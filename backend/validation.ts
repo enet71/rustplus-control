@@ -122,6 +122,39 @@ export function groupInput(
   return { name, deviceIds };
 }
 
+export function reorderInput(
+  body: unknown,
+  profile: ServerProfile,
+): Result<Array<{ type: 'group' | 'device'; id: string }>> {
+  const value = (body || {}) as { order?: unknown };
+  if (!Array.isArray(value.order)) return { error: 'order must be an array.' };
+  const order: Array<{ type: 'group' | 'device'; id: string }> = [];
+  for (const item of value.order) {
+    const entry = item as { type?: unknown; id?: unknown } | null;
+    if (entry?.type !== 'group' && entry?.type !== 'device')
+      return { error: 'Each order entry needs a valid type.' };
+    const id = String(entry.id || '');
+    if (!id) return { error: 'Each order entry needs an id.' };
+    order.push({ type: entry.type, id });
+  }
+  const groupedIds = new Set(profile.groups.flatMap((group) => group.deviceIds));
+  const currentIds = [
+    ...profile.groups.map((group) => group.id),
+    ...profile.devices
+      .filter((device) => !groupedIds.has(device.entityId))
+      .map((device) => device.entityId),
+  ];
+  const orderIds = order.map((entry) => entry.id);
+  const orderSet = new Set(orderIds);
+  if (
+    orderIds.length !== currentIds.length ||
+    orderSet.size !== orderIds.length ||
+    currentIds.some((id) => !orderSet.has(id))
+  )
+    return { error: 'order must contain exactly the current top-level items.' };
+  return order;
+}
+
 export function deviceBackupInput(body: unknown): Result<DeviceBackup> {
   const value = (body || {}) as { version?: unknown; devices?: unknown; groups?: unknown };
   if (value.version !== 1 || !Array.isArray(value.devices) || !Array.isArray(value.groups))

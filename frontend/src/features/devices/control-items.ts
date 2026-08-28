@@ -33,6 +33,22 @@ export function orderControlItems(devices: Device[], groups: DeviceGroup[]): Con
   return items.sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
+/**
+ * Devices selectable for a group: ungrouped devices, plus the group's own current
+ * members when editing (so they stay visible to remove). The backend rejects a
+ * device already claimed by another group, so exclude those here too.
+ */
+export function availableGroupDevices(
+  devices: Device[],
+  groups: DeviceGroup[],
+  currentGroupId: string | null,
+): Device[] {
+  const groupedElsewhere = new Set(
+    groups.filter((group) => group.id !== currentGroupId).flatMap((group) => group.deviceIds),
+  );
+  return devices.filter((device) => !groupedElsewhere.has(device.entityId));
+}
+
 export function groupSwitches(members: Device[]): Device[] {
   return members.filter((device) => device.type === 'switch');
 }

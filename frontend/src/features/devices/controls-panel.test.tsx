@@ -12,7 +12,7 @@ function fakeMutations(overrides: Partial<DeviceMutations> = {}): DeviceMutation
     setGroupEnabled: { mutate: vi.fn(), isPending: false, variables: undefined },
     renameDevice: { mutate: vi.fn(), isPending: false },
     saveGroup: { mutate: vi.fn(), isPending: false },
-    moveItem: { mutate: vi.fn(), isPending: false },
+    reorderItems: { mutate: vi.fn(), isPending: false },
     isDevicePending: () => false,
     isGroupPending: () => false,
     ...overrides,

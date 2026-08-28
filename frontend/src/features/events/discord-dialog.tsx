@@ -1,4 +1,14 @@
 import { useState, type FormEvent } from 'react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useSaveDiscordWebhook } from './use-discord-webhook';
 
 type DiscordDialogProps = {
@@ -21,35 +31,42 @@ export function DiscordDialog({ close, report }: DiscordDialogProps) {
   };
 
   return (
-    <dialog open>
-      <form className="stacked-form" onSubmit={submit}>
-        <h2>Discord alarms</h2>
-        <label>
-          Webhook URL
-          <input
-            type="url"
-            inputMode="url"
-            autoComplete="off"
-            placeholder="https://discord.com/api/webhooks/..."
-            value={url}
-            onChange={(event) => setUrl(event.target.value)}
-          />
-        </label>
-        <p className="hint">Leave empty to disable Discord alarm notifications.</p>
-        <div className="dialog-actions">
-          <button
-            type="button"
-            className="secondary"
-            disabled={saveWebhook.isPending}
-            onClick={close}
-          >
-            Cancel
-          </button>
-          <button type="submit" disabled={saveWebhook.isPending}>
-            Save
-          </button>
-        </div>
-      </form>
-    </dialog>
+    <Dialog open onOpenChange={(open) => !open && close()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Discord alarms</DialogTitle>
+        </DialogHeader>
+        <form className="grid gap-4" onSubmit={submit}>
+          <div className="grid gap-1.5">
+            <Label htmlFor="discord-webhook">Webhook URL</Label>
+            <Input
+              id="discord-webhook"
+              type="url"
+              inputMode="url"
+              autoComplete="off"
+              placeholder="https://discord.com/api/webhooks/..."
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+            />
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Leave empty to disable Discord alarm notifications.
+          </p>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={saveWebhook.isPending}
+              onClick={close}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saveWebhook.isPending}>
+              Save
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

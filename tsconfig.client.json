@@ -9,7 +9,10 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "@/*": ["./frontend/src/*"]
+    }
   },
   "include": ["frontend/src/**/*.ts", "frontend/src/**/*.tsx"]
 }

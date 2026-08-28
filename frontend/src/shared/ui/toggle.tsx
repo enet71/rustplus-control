@@ -1,25 +1,21 @@
-import type { MouseEventHandler } from 'react';
+import { Switch } from '@/components/ui/switch';
 
 type ToggleProps = {
   name: string;
   enabled: boolean;
   disabled?: boolean;
   className?: string;
-  onClick: MouseEventHandler<HTMLButtonElement>;
+  onClick: () => void;
 };
 
-export function Toggle({ name, enabled, disabled = false, className = '', onClick }: ToggleProps) {
+export function Toggle({ name, enabled, disabled = false, className, onClick }: ToggleProps) {
   return (
-    <button
-      type="button"
-      className={`toggle-switch ${enabled ? 'is-on' : ''} ${className}`}
+    <Switch
+      checked={enabled}
       disabled={disabled}
-      onClick={onClick}
-      role="switch"
+      onCheckedChange={onClick}
       aria-label={`Toggle ${name}`}
-      aria-checked={enabled}
-    >
-      <span />
-    </button>
+      className={className}
+    />
   );
 }

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Device, DeviceGroup } from '../../shared/api-types';
-import { groupSwitches, isGroupEnabled, orderControlItems } from './control-items';
+import {
+  availableGroupDevices,
+  groupSwitches,
+  isGroupEnabled,
+  orderControlItems,
+} from './control-items';
 
 function device(entityId: string, type: Device['type'], sortOrder?: number): Device {
   return { entityId, name: `Device ${entityId}`, type, sortOrder };
@@ -36,6 +41,19 @@ describe('orderControlItems', () => {
     const items = orderControlItems([device('a', 'switch'), device('b', 'switch', -1)], []);
 
     expect(items.map((item) => item.id)).toEqual(['b', 'a']);
+  });
+});
+
+describe('availableGroupDevices', () => {
+  const devices = [device('a', 'switch'), device('b', 'switch'), device('c', 'alarm')];
+  const groups = [group('g1', ['a']), group('g2', ['b'])];
+
+  it('excludes devices already claimed by another group', () => {
+    expect(availableGroupDevices(devices, groups, null).map((d) => d.entityId)).toEqual(['c']);
+  });
+
+  it('keeps the current group members selectable while editing it', () => {
+    expect(availableGroupDevices(devices, groups, 'g1').map((d) => d.entityId)).toEqual(['a', 'c']);
   });
 });
 

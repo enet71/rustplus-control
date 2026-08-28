@@ -1,4 +1,15 @@
 import { useState, type FormEvent } from 'react';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import type { Device, DeviceGroup } from '../../shared/api-types';
 import type { DeviceMutations } from './use-devices';
 
@@ -30,45 +41,49 @@ export function GroupDialog({ group, devices, mutations, close }: GroupDialogPro
   };
 
   return (
-    <dialog open>
-      <form className="stacked-form" onSubmit={submit}>
-        <h2>{group ? 'Edit device group' : 'New device group'}</h2>
-        <label>
-          Name
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            required
-            maxLength={80}
-          />
-        </label>
-        <fieldset className="group-members">
-          <legend>Devices</legend>
-          {devices.map((device) => (
-            <label key={device.entityId}>
-              <input
-                type="checkbox"
-                checked={deviceIds.includes(device.entityId)}
-                onChange={(event) => toggleMember(device.entityId, event.target.checked)}
-              />
-              {device.name}
-            </label>
-          ))}
-        </fieldset>
-        <div className="dialog-actions">
-          <button
-            type="button"
-            className="secondary"
-            disabled={saveGroup.isPending}
-            onClick={close}
-          >
-            Cancel
-          </button>
-          <button type="submit" disabled={saveGroup.isPending}>
-            Save
-          </button>
-        </div>
-      </form>
-    </dialog>
+    <Dialog open onOpenChange={(open) => !open && close()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{group ? 'Edit device group' : 'New device group'}</DialogTitle>
+        </DialogHeader>
+        <form className="grid gap-4" onSubmit={submit}>
+          <div className="grid gap-1.5">
+            <Label htmlFor="group-name">Name</Label>
+            <Input
+              id="group-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              required
+              maxLength={80}
+            />
+          </div>
+          <fieldset className="grid gap-2 rounded-md border border-input p-3">
+            <legend className="px-1 text-sm text-muted-foreground">Devices</legend>
+            {devices.map((device) => (
+              <Label key={device.entityId} className="font-normal text-foreground">
+                <Checkbox
+                  checked={deviceIds.includes(device.entityId)}
+                  onCheckedChange={(checked) => toggleMember(device.entityId, checked === true)}
+                />
+                {device.name}
+              </Label>
+            ))}
+          </fieldset>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={saveGroup.isPending}
+              onClick={close}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saveGroup.isPending}>
+              Save
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

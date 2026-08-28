@@ -384,12 +384,22 @@ export class RustplusControlService {
     return null;
   }
 
-  moveItem(type: 'group' | 'device', id: string, direction: -1 | 1): boolean {
+  /** `order` is validated by `reorderInput` to contain exactly the current top-level item ids. */
+  reorderTopLevel(order: Array<{ type: 'group' | 'device'; id: string }>): boolean {
     const profile = this.activeProfile();
     if (!profile) return false;
-    const next = this.moveProfileItem(profile, type, id, direction);
-    if (!next) return false;
-    this.setActiveProfile(next);
+    const indexById = new Map(order.map((entry, index) => [entry.id, index]));
+    this.setActiveProfile({
+      ...profile,
+      groups: profile.groups.map((group) =>
+        indexById.has(group.id) ? { ...group, sortOrder: indexById.get(group.id) } : group,
+      ),
+      devices: profile.devices.map((device) =>
+        indexById.has(device.entityId)
+          ? { ...device, sortOrder: indexById.get(device.entityId) }
+          : device,
+      ),
+    });
     return true;
   }
 
@@ -482,59 +492,6 @@ export class RustplusControlService {
         ),
       ) + 1
     );
-  }
-
-  private moveProfileItem(
-    profile: ServerProfile,
-    type: 'group' | 'device',
-    id: string,
-    direction: -1 | 1,
-  ): ServerProfile | null {
-    const parent =
-      type === 'device' ? profile.groups.find((group) => group.deviceIds.includes(id)) : null;
-    const items = parent
-      ? parent.deviceIds
-          .map((entityId, index) => ({
-            item: profile.devices.find((device) => device.entityId === entityId),
-            index,
-          }))
-          .filter((entry): entry is { item: Device; index: number } => Boolean(entry.item))
-      : [
-          ...profile.groups.map((item, index) => ({ item, index })),
-          ...profile.devices
-            .filter(
-              (device) =>
-                !profile.groups.some((group) => group.deviceIds.includes(device.entityId)),
-            )
-            .map((item, index) => ({ item, index: profile.groups.length + index })),
-        ];
-    const ordered = [...items].sort(
-      (left, right) =>
-        this.sortOrder(left.item, left.index) - this.sortOrder(right.item, right.index),
-    );
-    const position = ordered.findIndex(
-      (entry) => ('id' in entry.item ? entry.item.id : entry.item.entityId) === id,
-    );
-    const target = position + direction;
-    if (position < 0 || target < 0 || target >= ordered.length) return null;
-    [ordered[position], ordered[target]] = [ordered[target], ordered[position]];
-    const orderById = new Map(
-      ordered.map((entry, index) => [
-        'id' in entry.item ? entry.item.id : entry.item.entityId,
-        index,
-      ]),
-    );
-    return {
-      ...profile,
-      groups: profile.groups.map((group) =>
-        orderById.has(group.id) ? { ...group, sortOrder: orderById.get(group.id) } : group,
-      ),
-      devices: profile.devices.map((device) =>
-        orderById.has(device.entityId)
-          ? { ...device, sortOrder: orderById.get(device.entityId) }
-          : device,
-      ),
-    };
   }
 
   private publishEntityState(entityId: string, value: boolean): void {
