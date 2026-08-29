@@ -26,6 +26,7 @@ import { EventsPanel } from '../events/events-panel';
 import { useEventStream } from '../events/use-event-stream';
 import { useNotificationPermission } from '../events/use-notification-permission';
 import { MapView } from '../map/map-view';
+import { useCustomMarkerMutations } from '../map/use-custom-markers';
 import { FcmPanel } from '../pairing/fcm-panel';
 import { PairingDialog } from '../pairing/pairing-dialog';
 import { useFcmStatus, usePairingMutations, usePendingPairings } from '../pairing/use-pairing';
@@ -51,6 +52,7 @@ export function DashboardPage() {
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const deviceMutations = useDeviceMutations(setFeedback);
+  const customMarkerMutations = useCustomMarkerMutations(setFeedback);
   const pairingMutations = usePairingMutations(setFeedback);
   const activateServer = useActivateServer(setFeedback);
   const backup = useDeviceBackup(setFeedback);
@@ -229,6 +231,8 @@ export function DashboardPage() {
                 mapMarkers={state.mapMarkers}
                 mapNotes={state.mapNotes}
                 deathMarkers={state.deathMarkers}
+                customMarkers={state.config.customMarkers}
+                customMarkerMutations={customMarkerMutations}
               />
             )}
           </div>

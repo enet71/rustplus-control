@@ -2,6 +2,16 @@
 
 Use this file for confirmed, project-specific lessons. Add entries in reverse chronological order.
 
+## 2026-08-29 - A Dialog opened synchronously from a DropdownMenuItem's `onSelect` becomes unresponsive
+
+**Context:** `frontend/src/features/map/custom-markers-panel.tsx`'s row "..." menu (`DropdownMenu`/`DropdownMenuItem` from `components/ui/dropdown-menu.tsx`), whose "Edit" item opened a `CustomMarkerDialog` (Radix `Dialog`) by calling `setEditing(marker)` directly inside `onSelect`.
+
+**What went wrong:** The dialog visibly opened, but its own Cancel button and the built-in Close (X) button stopped responding to clicks — both are plain `onClick`/Radix-`Close` handlers with no reason to fail on their own. Root cause: opening a Radix `Dialog` in the same tick as a Radix `DropdownMenu` closes races the menu's own closing cleanup (focus return, `DismissableLayer`/body pointer-events bookkeeping) against the dialog's mount, leaving the freshly-opened dialog unable to receive pointer events. This is invisible to jsdom-based tests: `userEvent.click()` dispatches directly to the target element by reference rather than doing real hit-testing through CSS `pointer-events`, so a test asserting only the "happy path" (fill the form, click Save) passes regardless of whether Cancel/Close would actually receive a click in a real browser.
+
+**Required behavior:** Any `DropdownMenuItem` whose `onSelect` opens a `Dialog`/`AlertDialog` must defer that state change to the next tick instead of calling it synchronously. Fixed once at the shared component (`components/ui/dropdown-menu.tsx`'s `DropdownMenuItem` now wraps every `onSelect` in `setTimeout(() => onSelect(event), 0)`) rather than patching each call site, since the same pattern already existed for device/group delete confirmation (`device-row.tsx` / `group-row.tsx` → `ControlsPanel`) and would silently share the same bug in a real browser despite passing tests.
+
+**Evidence:** User reported "В модалке редактирования метки не работает кенсел и клоз" (Cancel and Close don't work in the marker-edit modal) after the edit flow was wired through a `DropdownMenuItem`.
+
 ## 2026-08-29 - Player-placed in-game map markers come from `AppTeamInfo.mapNotes`/`leaderMapNotes`, not `AppMapMarkers`
 
 **Context:** Rendering the Rust+ map in `frontend/src/features/map/map-view.tsx`, backed by `backend/services/rustplus/world-state-service.ts`.

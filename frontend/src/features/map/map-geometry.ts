@@ -203,6 +203,29 @@ export function zoomMapTransform(
   return { scale, x: cursor.x - localX * scale, y: cursor.y - localY * scale };
 }
 
+/** Inverse of `markerPosition`: given a click's position in container pixels
+ *  (relative to `.rust-map`'s top-left corner) and the canvas's current pan/zoom,
+ *  returns the Rust world coordinates under that point. */
+export function worldPositionFromScreen(
+  map: RustMap,
+  transform: MapTransform,
+  fit: Size,
+  screen: { x: number; y: number },
+): { x: number; y: number } {
+  if (!fit.width || !fit.height) return { x: 0, y: 0 };
+  const layerX = (screen.x - transform.x) / transform.scale;
+  const layerY = (screen.y - transform.y) / transform.scale;
+  const pixelX = (layerX / fit.width) * map.width;
+  const pixelY = (layerY / fit.height) * map.height;
+  const margin = Number(map.oceanMargin || 0);
+  const playableWidth = map.width - margin * 2;
+  const playableHeight = map.height - margin * 2;
+  return {
+    x: ((pixelX - margin) / playableWidth) * map.mapSize,
+    y: map.mapSize - ((pixelY - margin) / playableHeight) * map.mapSize,
+  };
+}
+
 export type PixelRect = { left: number; top: number; width: number; height: number };
 
 /**

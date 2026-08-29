@@ -37,6 +37,7 @@ export function dashboardState(overrides: Partial<DashboardState> = {}): Dashboa
       servers: [{ id: 'server-1', name: 'Test server' }],
       devices: [],
       groups: [],
+      customMarkers: [],
       discordConfigured: false,
     },
     ...overrides,

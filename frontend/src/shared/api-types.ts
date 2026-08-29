@@ -23,6 +23,14 @@ export type StorageItem = {
 
 export type StorageState = { capacity: number; items: StorageItem[] };
 
+export type CustomMarker = {
+  id: string;
+  name: string;
+  description: string;
+  x: number;
+  y: number;
+};
+
 export type DashboardState = {
   connected: boolean;
   message: string;
@@ -46,6 +54,7 @@ export type DashboardState = {
     servers: Array<{ id: string; name: string }>;
     devices: Device[];
     groups: DeviceGroup[];
+    customMarkers: CustomMarker[];
     discordConfigured: boolean;
   };
 };

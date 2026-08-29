@@ -13,6 +13,9 @@
 .rust-map.is-panning {
   cursor: grabbing;
 }
+.rust-map.is-placing {
+  cursor: crosshair;
+}
 .map-canvas {
   position: absolute;
   top: 0;
@@ -148,6 +151,15 @@
   background: #3b82f6;
   color: #fff;
 }
+.map-marker.custom {
+  display: flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  background: #a855f7;
+  color: #fff;
+}
 .map-marker.death {
   display: flex;
   width: 18px;
@@ -207,6 +219,9 @@
 }
 .map-dot-note {
   background: #3b82f6;
+}
+.map-dot-custom {
+  background: #a855f7;
 }
 .map-dot-monument {
   background: color-mix(in srgb, var(--foreground) 25%, var(--card));

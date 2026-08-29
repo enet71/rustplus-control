@@ -1,5 +1,12 @@
 import { Router } from 'express';
-import { deviceBackupInput, groupInput, isValidationError, reorderInput } from '../validation';
+import {
+  customMarkerCreateInput,
+  customMarkerUpdateInput,
+  deviceBackupInput,
+  groupInput,
+  isValidationError,
+  reorderInput,
+} from '../validation';
 import { RustplusControlService } from '../services/rustplus-control-service';
 
 export function createDeviceRouter(control: RustplusControlService): Router {
@@ -86,6 +93,31 @@ export function createDeviceRouter(control: RustplusControlService): Router {
     if (result === 'failed')
       return response.status(502).json({ error: 'Rust+ rejected one or more group commands.' });
     return response.json({ ok: true });
+  });
+
+  router.post('/custom-markers', (request, response) => {
+    if (!control.getActiveProfile())
+      return response.status(404).json({ error: 'No active server.' });
+    const input = customMarkerCreateInput(request.body);
+    if (isValidationError(input)) return response.status(400).json({ error: input.error });
+    const marker = control.createCustomMarker(input.name, input.description, input.x, input.y);
+    return response.status(201).json({ marker });
+  });
+  router.patch('/custom-markers/:id', (request, response) => {
+    if (!control.getActiveProfile())
+      return response.status(404).json({ error: 'No active server.' });
+    const input = customMarkerUpdateInput(request.body);
+    if (isValidationError(input)) return response.status(400).json({ error: input.error });
+    return control.updateCustomMarker(request.params.id, input.name, input.description)
+      ? response.json({ ok: true })
+      : response.status(404).json({ error: 'Unknown marker.' });
+  });
+  router.delete('/custom-markers/:id', (request, response) => {
+    if (!control.getActiveProfile())
+      return response.status(404).json({ error: 'No active server.' });
+    return control.deleteCustomMarker(request.params.id)
+      ? response.status(204).end()
+      : response.status(404).json({ error: 'Unknown marker.' });
   });
 
   router.post('/items/reorder', (request, response) => {

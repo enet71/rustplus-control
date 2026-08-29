@@ -162,6 +162,36 @@ export function reorderInput(
   return order;
 }
 
+function customMarkerText(body: unknown): Result<{ name: string; description: string }> {
+  const value = (body || {}) as { name?: unknown; description?: unknown };
+  const name = String(value.name || '').trim();
+  const description = String(value.description || '').trim();
+  if (!name || name.length > 80)
+    return { error: 'Marker name must be between 1 and 80 characters.' };
+  if (description.length > 500)
+    return { error: 'Marker description must be at most 500 characters.' };
+  return { name, description };
+}
+
+export function customMarkerCreateInput(
+  body: unknown,
+): Result<{ name: string; description: string; x: number; y: number }> {
+  const text = customMarkerText(body);
+  if (isValidationError(text)) return text;
+  const value = (body || {}) as { x?: unknown; y?: unknown };
+  const x = Number(value.x);
+  const y = Number(value.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y))
+    return { error: 'Marker position must include numeric x and y.' };
+  return { ...text, x, y };
+}
+
+export function customMarkerUpdateInput(
+  body: unknown,
+): Result<{ name: string; description: string }> {
+  return customMarkerText(body);
+}
+
 export function deviceBackupInput(body: unknown): Result<DeviceBackup> {
   const value = (body || {}) as { version?: unknown; devices?: unknown; groups?: unknown };
   if (value.version !== 1 || !Array.isArray(value.devices) || !Array.isArray(value.groups))

@@ -136,6 +136,41 @@ test('deleteDevice removes the device and drops it from any groups, dropping gro
   assert.deepEqual(state.config.groups[0].deviceIds, ['b']);
 });
 
+test('custom markers can be created, edited and deleted, and survive a profile with none saved', () => {
+  const repository = {
+    migrateLegacyFcmConfig() {},
+    loadConfig() {
+      return {
+        activeServerId: 'server',
+        servers: [{ id: 'server', name: 'Server', server: {}, devices: [], groups: [] }],
+      };
+    },
+    hasFcmConfig() {
+      return false;
+    },
+    saveConfig() {},
+  };
+  const control = new RustplusControlService(repository, process.cwd(), false);
+
+  assert.deepEqual(control.getState().config.customMarkers, []);
+
+  const marker = control.createCustomMarker('Base', 'Main entrance', 100, 200);
+  assert.equal(marker.name, 'Base');
+  assert.deepEqual(control.getState().config.customMarkers, [marker]);
+
+  assert.equal(control.updateCustomMarker(marker.id, 'Renamed', 'Updated'), true);
+  assert.equal(control.updateCustomMarker('missing', 'x', 'y'), false);
+  const updated = control.getState().config.customMarkers[0];
+  assert.equal(updated.name, 'Renamed');
+  assert.equal(updated.description, 'Updated');
+  assert.equal(updated.x, 100);
+  assert.equal(updated.y, 200);
+
+  assert.equal(control.deleteCustomMarker(marker.id), true);
+  assert.equal(control.deleteCustomMarker(marker.id), false);
+  assert.deepEqual(control.getState().config.customMarkers, []);
+});
+
 test('storage monitor refreshes after a pipe change pulse without items', () => {
   const repository = {
     migrateLegacyFcmConfig() {},

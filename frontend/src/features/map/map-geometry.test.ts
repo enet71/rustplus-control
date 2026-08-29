@@ -16,6 +16,7 @@ import {
   monumentLabel,
   playableInset,
   prettifyMonumentToken,
+  worldPositionFromScreen,
   zoomMapTransform,
 } from './map-geometry';
 import type { RustMap } from '../../shared/api-types';
@@ -121,6 +122,32 @@ describe('markerPosition', () => {
   it('places ocean monuments (e.g. oil rigs) outside the playable square within the ocean margin', () => {
     expect(markerPosition(map, { x: -500, y: 1500 })).toEqual({ left: '0%', top: '50%' });
     expect(markerPosition(map, { x: 3500, y: 1500 })).toEqual({ left: '100%', top: '50%' });
+  });
+});
+
+describe('worldPositionFromScreen', () => {
+  const fit = { width: map.width, height: map.height };
+  const identity = { x: 0, y: 0, scale: 1 };
+
+  it('inverts markerPosition at the map center', () => {
+    expect(worldPositionFromScreen(map, identity, fit, { x: 1000, y: 1000 })).toEqual({
+      x: 1500,
+      y: 1500,
+    });
+  });
+
+  it('accounts for the canvas pan and zoom', () => {
+    const transform = { x: 10, y: 20, scale: 2 };
+    expect(worldPositionFromScreen(map, transform, fit, { x: 2010, y: 2020 })).toEqual({
+      x: 1500,
+      y: 1500,
+    });
+  });
+
+  it('returns a zero sentinel before the map has been fitted (fit size still 0)', () => {
+    expect(
+      worldPositionFromScreen(map, identity, { width: 0, height: 0 }, { x: 10, y: 10 }),
+    ).toEqual({ x: 0, y: 0 });
   });
 });
 

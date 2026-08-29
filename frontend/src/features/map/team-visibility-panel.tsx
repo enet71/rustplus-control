@@ -1,17 +1,14 @@
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { MapPin, Moon, User, Users, X } from 'lucide-react';
+import { Moon, User, Users, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import type { DashboardState } from '../../shared/api-types';
-import type { NoteSource } from './hidden-note-sources';
 
 type TeamVisibilityPanelProps = {
   members: DashboardState['teamMapMembers'];
   hiddenIds: Set<string>;
   onToggle: (id: string) => void;
-  hiddenNoteSources: Set<NoteSource>;
-  onToggleNoteSource: (source: NoteSource) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 };
@@ -20,8 +17,6 @@ export function TeamVisibilityPanel({
   members,
   hiddenIds,
   onToggle,
-  hiddenNoteSources,
-  onToggleNoteSource,
   open,
   onOpenChange,
 }: TeamVisibilityPanelProps) {
@@ -57,7 +52,7 @@ export function TeamVisibilityPanel({
       {...stopMapGesture}
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
-        <span className="text-sm font-semibold">Map</span>
+        <span className="text-sm font-semibold">Teammates</span>
         <Button
           variant="ghost"
           size="icon"
@@ -68,27 +63,7 @@ export function TeamVisibilityPanel({
           <X className="size-4" />
         </Button>
       </div>
-      <div className="flex shrink-0 flex-col gap-1 border-b border-border p-2">
-        <p className="px-1 text-xs font-medium text-muted-foreground">Map markers</p>
-        <Label className="flex items-center gap-2 rounded-md px-1 py-1 font-normal text-foreground hover:bg-muted">
-          <Checkbox
-            checked={!hiddenNoteSources.has('own')}
-            onCheckedChange={() => onToggleNoteSource('own')}
-          />
-          <MapPin className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 truncate text-sm">My markers</span>
-        </Label>
-        <Label className="flex items-center gap-2 rounded-md px-1 py-1 font-normal text-foreground hover:bg-muted">
-          <Checkbox
-            checked={!hiddenNoteSources.has('leader')}
-            onCheckedChange={() => onToggleNoteSource('leader')}
-          />
-          <MapPin className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 truncate text-sm">Leader's markers</span>
-        </Label>
-      </div>
       <div className="flex flex-col gap-1 overflow-y-auto p-2">
-        <p className="px-1 text-xs font-medium text-muted-foreground">Teammates</p>
         {members.length === 0 && (
           <p className="px-1 py-1 text-xs text-muted-foreground">No teammates nearby.</p>
         )}

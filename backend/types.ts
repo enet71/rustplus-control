@@ -28,12 +28,21 @@ export interface DeviceBackup {
   groups: DeviceGroup[];
 }
 
+export interface CustomMarker {
+  id: string;
+  name: string;
+  description: string;
+  x: number;
+  y: number;
+}
+
 export interface ServerProfile {
   id: string;
   name: string;
   server: RustServerSettings;
   devices: Device[];
   groups: DeviceGroup[];
+  customMarkers: CustomMarker[];
   discordWebhookUrl?: string;
 }
 

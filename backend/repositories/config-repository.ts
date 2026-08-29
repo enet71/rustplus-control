@@ -25,7 +25,11 @@ export class ConfigRepository {
       if (this.isAppConfig(loaded)) {
         return {
           activeServerId: loaded.activeServerId || loaded.servers[0]?.id || null,
-          servers: loaded.servers,
+          // Servers saved before `customMarkers` existed have no such key on disk.
+          servers: loaded.servers.map((server) => ({
+            ...server,
+            customMarkers: server.customMarkers || [],
+          })),
           steamApiKey: loaded.steamApiKey || undefined,
         };
       }
@@ -40,6 +44,7 @@ export class ConfigRepository {
               server: loaded.server,
               devices: loaded.devices || [],
               groups: [],
+              customMarkers: [],
             },
           ],
         };

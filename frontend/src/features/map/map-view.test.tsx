@@ -5,31 +5,54 @@ import { saveAccessToken } from '../../shared/session';
 import { renderWithProviders } from '../../test-utils';
 import type { DashboardState } from '../../shared/api-types';
 import { MapView } from './map-view';
+import type { CustomMarkerMutations } from './use-custom-markers';
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+// Mirrors `fakeMutations` in `controls-panel.test.tsx`: a plain spy object, not a real
+// `useMutation` — `MapView` receives the mutations object as a prop and never fetches
+// `/api/state` itself, so there is nothing for a real mutation's `invalidateQueries` to
+// refetch inside this isolated render.
+function fakeCustomMarkerMutations(
+  overrides: Partial<CustomMarkerMutations> = {},
+): CustomMarkerMutations {
+  return {
+    createCustomMarker: { mutateAsync: vi.fn(), isPending: false },
+    updateCustomMarker: { mutateAsync: vi.fn(), isPending: false },
+    deleteCustomMarker: { mutateAsync: vi.fn(), isPending: false },
+    ...overrides,
+  } as unknown as CustomMarkerMutations;
+}
 
 function renderMap(
   response: () => Response,
   teamMapMembers: DashboardState['teamMapMembers'] = [],
   deathMarkers: DashboardState['deathMarkers'] = [],
   mapNotes: DashboardState['mapNotes'] = [],
+  customMarkers: DashboardState['config']['customMarkers'] = [],
+  customMarkerMutations: CustomMarkerMutations = fakeCustomMarkerMutations(),
 ) {
   saveAccessToken('access-key');
   vi.stubGlobal(
     'fetch',
     vi.fn(() => Promise.resolve(response())),
   );
-  return renderWithProviders(
-    <MapView
-      serverId="server-1"
-      teamMapMembers={teamMapMembers}
-      mapMarkers={[]}
-      mapNotes={mapNotes}
-      deathMarkers={deathMarkers}
-    />,
-  );
+  return {
+    ...renderWithProviders(
+      <MapView
+        serverId="server-1"
+        teamMapMembers={teamMapMembers}
+        mapMarkers={[]}
+        mapNotes={mapNotes}
+        deathMarkers={deathMarkers}
+        customMarkers={customMarkers}
+        customMarkerMutations={customMarkerMutations}
+      />,
+    ),
+    mutations: customMarkerMutations,
+  };
 }
 
 function readyMapResponse(
@@ -159,6 +182,7 @@ describe('MapView', () => {
     );
     await waitFor(() => expect(screen.getAllByTitle('Marker placed in-game').length).toBe(2));
 
+    await user.click(screen.getByRole('button', { name: 'Show markers panel' }));
     await user.click(screen.getByRole('checkbox', { name: 'My markers' }));
     expect(screen.getAllByTitle('Marker placed in-game').length).toBe(1);
 
@@ -173,6 +197,7 @@ describe('MapView', () => {
     ];
     const first = renderMap(readyMapResponse, [], [], notes);
     await waitFor(() => expect(screen.queryByTitle('Marker placed in-game')).not.toBeNull());
+    await user.click(screen.getByRole('button', { name: 'Show markers panel' }));
     await user.click(screen.getByRole('checkbox', { name: 'My markers' }));
     expect(screen.queryByTitle('Marker placed in-game')).toBeNull();
     first.unmount();
@@ -262,5 +287,173 @@ describe('MapView', () => {
     await waitFor(() => expect(screen.queryByAltText('Rust server map')).not.toBeNull());
     expect(screen.queryByText('Teammates')).toBeNull();
     expect(screen.getByRole('button', { name: 'Show team panel' })).not.toBeNull();
+  });
+});
+
+describe('MapView custom markers', () => {
+  it('places a custom marker by clicking the map, calling the create mutation with the position', async () => {
+    const user = userEvent.setup();
+    const { container, mutations } = renderMap(readyMapResponse);
+    await waitFor(() => expect(screen.queryByAltText('Rust server map')).not.toBeNull());
+
+    await user.click(screen.getByRole('button', { name: 'Show markers panel' }));
+    await user.click(screen.getByRole('button', { name: 'Add marker' }));
+    expect(screen.queryByText('Click on the map to place a marker')).not.toBeNull();
+
+    await user.click(container.querySelector('.rust-map')!);
+
+    expect(screen.getByRole('heading', { name: 'Add marker' })).not.toBeNull();
+    await user.type(screen.getByLabelText('Name'), 'Base');
+    await user.type(screen.getByLabelText('Description'), 'Main base entrance');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutations.createCustomMarker.mutateAsync).toHaveBeenCalledWith({
+      name: 'Base',
+      description: 'Main base entrance',
+      // jsdom never lays elements out, so the clicked container rect is 0-sized —
+      // the resulting world position is the geometry function's zero sentinel.
+      x: 0,
+      y: 0,
+    });
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Add marker' })).toBeNull());
+  });
+
+  it('cancelling placement mode does not create a marker', async () => {
+    const user = userEvent.setup();
+    const { mutations } = renderMap(readyMapResponse);
+    await waitFor(() => expect(screen.queryByAltText('Rust server map')).not.toBeNull());
+
+    await user.click(screen.getByRole('button', { name: 'Show markers panel' }));
+    await user.click(screen.getByRole('button', { name: 'Add marker' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByText('Click on the map to place a marker')).toBeNull();
+    expect(screen.queryByText('No custom markers yet.')).not.toBeNull();
+    expect(mutations.createCustomMarker.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('keeps the add-marker dialog open when the create mutation fails', async () => {
+    const user = userEvent.setup();
+    const mutations = fakeCustomMarkerMutations({
+      createCustomMarker: {
+        mutateAsync: vi.fn().mockRejectedValue(new Error('failed')),
+        isPending: false,
+      } as unknown as CustomMarkerMutations['createCustomMarker'],
+    });
+    const { container } = renderMap(readyMapResponse, [], [], [], [], mutations);
+    await waitFor(() => expect(screen.queryByAltText('Rust server map')).not.toBeNull());
+
+    await user.click(screen.getByRole('button', { name: 'Show markers panel' }));
+    await user.click(screen.getByRole('button', { name: 'Add marker' }));
+    await user.click(container.querySelector('.rust-map')!);
+    await user.type(screen.getByLabelText('Name'), 'Base');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutations.createCustomMarker.mutateAsync).toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Add marker' })).not.toBeNull();
+  });
+
+  it('renders existing custom markers with their name and description', async () => {
+    renderMap(
+      readyMapResponse,
+      [],
+      [],
+      [],
+      [{ id: 'm1', name: 'Base', description: 'Main base entrance', x: 100, y: 200 }],
+    );
+    await waitFor(() => expect(screen.queryByAltText('Rust server map')).not.toBeNull());
+
+    // testing-library normalizes whitespace, so the title's embedded newline reads as a space.
+    expect(screen.getByTitle('Base Main base entrance')).not.toBeNull();
+  });
+
+  it("shows a custom marker's info in a dialog when clicked", async () => {
+    const user = userEvent.setup();
+    renderMap(
+      readyMapResponse,
+      [],
+      [],
+      [],
+      [{ id: 'm1', name: 'Base', description: 'Main base entrance', x: 100, y: 200 }],
+    );
+    await waitFor(() => expect(screen.queryByAltText('Rust server map')).not.toBeNull());
+
+    await user.click(screen.getByTitle('Base Main base entrance'));
+
+    expect(screen.getByRole('heading', { name: 'Base' })).not.toBeNull();
+    expect(screen.getByText('Main base entrance')).not.toBeNull();
+  });
+
+  it("opens the edit dialog, prefilled, from the info dialog's Edit button", async () => {
+    const user = userEvent.setup();
+    const { mutations } = renderMap(
+      readyMapResponse,
+      [],
+      [],
+      [],
+      [{ id: 'm1', name: 'Base', description: 'Main base entrance', x: 100, y: 200 }],
+    );
+    await waitFor(() => expect(screen.queryByAltText('Rust server map')).not.toBeNull());
+
+    await user.click(screen.getByTitle('Base Main base entrance'));
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+
+    expect(screen.queryByRole('heading', { name: 'Base' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Edit marker' })).not.toBeNull();
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Base');
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutations.updateCustomMarker.mutateAsync).toHaveBeenCalledWith({
+      id: 'm1',
+      name: 'Base',
+      description: 'Main base entrance',
+    });
+  });
+
+  it('edits a custom marker from its panel row', async () => {
+    const user = userEvent.setup();
+    const { mutations } = renderMap(
+      readyMapResponse,
+      [],
+      [],
+      [],
+      [{ id: 'm1', name: 'Base', description: 'Main base entrance', x: 100, y: 200 }],
+    );
+    await waitFor(() => expect(screen.queryByAltText('Rust server map')).not.toBeNull());
+    await user.click(screen.getByRole('button', { name: 'Show markers panel' }));
+
+    await user.click(screen.getByRole('button', { name: 'More actions for Base' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Edit' }));
+    const nameInput = screen.getByLabelText('Name');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Renamed base');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutations.updateCustomMarker.mutateAsync).toHaveBeenCalledWith({
+      id: 'm1',
+      name: 'Renamed base',
+      description: 'Main base entrance',
+    });
+  });
+
+  it('deletes a custom marker from its panel row only after confirming', async () => {
+    const user = userEvent.setup();
+    const { mutations } = renderMap(
+      readyMapResponse,
+      [],
+      [],
+      [],
+      [{ id: 'm1', name: 'Base', description: 'Main base entrance', x: 100, y: 200 }],
+    );
+    await waitFor(() => expect(screen.queryByAltText('Rust server map')).not.toBeNull());
+    await user.click(screen.getByRole('button', { name: 'Show markers panel' }));
+
+    await user.click(screen.getByRole('button', { name: 'More actions for Base' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    expect(mutations.deleteCustomMarker.mutateAsync).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(mutations.deleteCustomMarker.mutateAsync).toHaveBeenCalledWith('m1');
   });
 });

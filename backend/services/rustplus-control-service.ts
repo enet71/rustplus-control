@@ -4,6 +4,7 @@ import { ConfigRepository } from '../repositories/config-repository';
 import type {
   AppConfig,
   ConnectionStatus,
+  CustomMarker,
   Device,
   DeviceBackup,
   DeviceGroup,
@@ -224,6 +225,7 @@ export class RustplusControlService {
         server: input.server,
         devices: [],
         groups: [],
+        customMarkers: [],
       };
       this.saveConfig({
         ...this.config,
@@ -334,6 +336,39 @@ export class RustplusControlService {
     return true;
   }
 
+  createCustomMarker(name: string, description: string, x: number, y: number): CustomMarker | null {
+    const profile = this.activeProfile();
+    if (!profile) return null;
+    const marker: CustomMarker = { id: crypto.randomUUID(), name, description, x, y };
+    this.setActiveProfile({
+      ...profile,
+      customMarkers: [...(profile.customMarkers || []), marker],
+    });
+    return marker;
+  }
+
+  updateCustomMarker(id: string, name: string, description: string): boolean {
+    const profile = this.activeProfile();
+    if (!profile || !(profile.customMarkers || []).some((marker) => marker.id === id)) return false;
+    this.setActiveProfile({
+      ...profile,
+      customMarkers: (profile.customMarkers || []).map((marker) =>
+        marker.id === id ? { ...marker, name, description } : marker,
+      ),
+    });
+    return true;
+  }
+
+  deleteCustomMarker(id: string): boolean {
+    const profile = this.activeProfile();
+    if (!profile || !(profile.customMarkers || []).some((marker) => marker.id === id)) return false;
+    this.setActiveProfile({
+      ...profile,
+      customMarkers: (profile.customMarkers || []).filter((marker) => marker.id !== id),
+    });
+    return true;
+  }
+
   async setGroupValue(id: string, enabled: boolean): Promise<SwitchCommandResult> {
     if (!this.client || !this.status.connected) return 'not-connected';
     const profile = this.activeProfile();
@@ -408,6 +443,7 @@ export class RustplusControlService {
         iconUrl: this.itemCatalog.getDeviceIcon(device.type)?.iconUrl,
       })),
       groups: profile?.groups || [],
+      customMarkers: profile?.customMarkers || [],
       discordConfigured: Boolean(profile?.discordWebhookUrl),
       activeServerId: this.config.activeServerId,
       servers: this.config.servers.map((item) => ({
@@ -525,6 +561,7 @@ export class RustplusControlService {
         },
         devices: existing?.devices || [],
         groups: existing?.groups || [],
+        customMarkers: existing?.customMarkers || [],
       };
       this.saveConfig({
         ...this.config,

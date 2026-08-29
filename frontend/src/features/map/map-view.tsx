@@ -6,9 +6,14 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { MapPin, Moon, Skull, Train, TrainFrontTunnel, User } from 'lucide-react';
+import { MapPin, MapPinPlus, Moon, Skull, Train, TrainFrontTunnel, User } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { DashboardState } from '../../shared/api-types';
+import { CustomMarkerDialog } from './custom-marker-dialog';
+import { CustomMarkerInfoDialog } from './custom-marker-info-dialog';
+import { CustomMarkersPanel } from './custom-markers-panel';
+import type { CustomMarkerMutations } from './use-custom-markers';
 import {
   readHiddenNoteSources,
   writeHiddenNoteSources,
@@ -30,11 +35,16 @@ import {
   markerPosition,
   monumentLabel,
   playableInset,
+  worldPositionFromScreen,
   zoomMapTransform,
   type MapTransform,
   type Size,
 } from './map-geometry';
 import { isMapNotReady, useMap } from './use-map';
+
+const CLICK_DRAG_TOLERANCE_PX = 5;
+
+type CustomMarker = DashboardState['config']['customMarkers'][number];
 
 type MapViewProps = {
   serverId: string;
@@ -42,6 +52,8 @@ type MapViewProps = {
   mapMarkers: DashboardState['mapMarkers'];
   mapNotes: DashboardState['mapNotes'];
   deathMarkers: DashboardState['deathMarkers'];
+  customMarkers: CustomMarker[];
+  customMarkerMutations: CustomMarkerMutations;
 };
 
 function MapPlaceholder({ message }: { message: string }) {
@@ -58,6 +70,8 @@ export function MapView({
   mapMarkers,
   mapNotes,
   deathMarkers,
+  customMarkers,
+  customMarkerMutations,
 }: MapViewProps) {
   const { data: map, error } = useMap(serverId);
   // A plain ref set in a mount-only effect would miss the container: `map` is still
@@ -78,16 +92,29 @@ export function MapView({
     readHiddenNoteSources(serverId),
   );
   const [teamPanelOpen, setTeamPanelOpen] = useState(() => readTeamPanelOpen(serverId));
+  const [customMarkersPanelOpen, setCustomMarkersPanelOpen] = useState(false);
+  const [placingMarker, setPlacingMarker] = useState(false);
+  const [pendingMarkerPosition, setPendingMarkerPosition] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [viewingMarker, setViewingMarker] = useState<CustomMarker | null>(null);
+  const [editingMarker, setEditingMarker] = useState<CustomMarker | null>(null);
+  const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
   const [hiddenStateServerId, setHiddenStateServerId] = useState(serverId);
 
-  // `MapView` isn't remounted per server (unlike `ControlsPanel`), so the stored sets
-  // have to be re-read explicitly whenever the active server changes instead of only
+  // `MapView` isn't remounted per server (unlike `ControlsPanel`), so the stored state
+  // has to be re-read explicitly whenever the active server changes instead of only
   // once at mount — done during render, mirroring the `resetKey` pattern below.
   if (hiddenStateServerId !== serverId) {
     setHiddenStateServerId(serverId);
     setHiddenPlayers(readHiddenPlayers(serverId));
     setHiddenNoteSources(readHiddenNoteSources(serverId));
     setTeamPanelOpen(readTeamPanelOpen(serverId));
+    setPlacingMarker(false);
+    setPendingMarkerPosition(null);
+    setViewingMarker(null);
+    setEditingMarker(null);
   }
 
   const setTeamPanelOpenPersisted = (open: boolean): void => {
@@ -112,6 +139,26 @@ export function MapView({
       writeHiddenNoteSources(serverId, next);
       return next;
     });
+
+  const createCustomMarker = async (name: string, description: string): Promise<void> => {
+    if (!pendingMarkerPosition) return;
+    await customMarkerMutations.createCustomMarker.mutateAsync({
+      name,
+      description,
+      ...pendingMarkerPosition,
+    });
+    setPendingMarkerPosition(null);
+  };
+
+  const saveEditedMarker = async (name: string, description: string): Promise<void> => {
+    if (!editingMarker) return;
+    await customMarkerMutations.updateCustomMarker.mutateAsync({
+      id: editingMarker.id,
+      name,
+      description,
+    });
+    setEditingMarker(null);
+  };
 
   const visibleTeamMembers = teamMapMembers.filter((member) => !hiddenPlayers.has(member.id));
   const visibleDeathMarkers = deathMarkers.filter((death) => !hiddenPlayers.has(death.playerId));
@@ -160,9 +207,19 @@ export function MapView({
     return () => containerEl.removeEventListener('wheel', onWheel);
   }, [containerEl, fit, containerSize]);
 
+  useEffect(() => {
+    if (!placingMarker) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPlacingMarker(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [placingMarker]);
+
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
     if (event.button !== 0) return;
     dragRef.current = { x: event.clientX, y: event.clientY };
+    pointerDownRef.current = { x: event.clientX, y: event.clientY };
     setIsPanning(true);
     event.currentTarget.setPointerCapture(event.pointerId);
   };
@@ -183,6 +240,22 @@ export function MapView({
     setIsPanning(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
+
+    const start = pointerDownRef.current;
+    pointerDownRef.current = null;
+    if (!start || !map || !placingMarker) return;
+    const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+    // A real drag pans the map instead; only a near-stationary press/release counts
+    // as "clicking a spot" to place a marker there.
+    if (moved > CLICK_DRAG_TOLERANCE_PX) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    setPendingMarkerPosition(
+      worldPositionFromScreen(map, transform, fit, {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      }),
+    );
+    setPlacingMarker(false);
   };
 
   if (!map) {
@@ -200,7 +273,7 @@ export function MapView({
     <section className="flex min-h-0 flex-1 flex-col">
       <div
         ref={setContainerEl}
-        className={cn('rust-map', isPanning && 'is-panning')}
+        className={cn('rust-map', isPanning && 'is-panning', placingMarker && 'is-placing')}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={stopPanning}
@@ -290,6 +363,27 @@ export function MapView({
               </span>
             </span>
           ))}
+          {customMarkers.map((marker) => (
+            <span
+              className="map-marker-anchor"
+              key={marker.id}
+              // `.map-marker-anchor` sets `cursor: default` in map.css, loaded after
+              // Tailwind's utilities, so a `cursor-pointer` class would lose to it —
+              // an inline style always wins regardless of cascade order.
+              style={{ ...markerPosition(map, marker), cursor: 'pointer' }}
+              title={marker.description ? `${marker.name}\n${marker.description}` : marker.name}
+              // Stopped so clicking a marker neither pans the map nor, while in
+              // placement mode, is misread as "place a new marker here".
+              onPointerDown={(event) => event.stopPropagation()}
+              onPointerUp={(event) => event.stopPropagation()}
+              onClick={() => setViewingMarker(marker)}
+            >
+              <span className="map-marker custom">
+                <MapPinPlus className="size-3" />
+              </span>
+              <span className="map-marker-label">{marker.name}</span>
+            </span>
+          ))}
           {visibleDeathMarkers.map((death) => (
             <span
               className="map-marker-anchor"
@@ -326,12 +420,61 @@ export function MapView({
           members={teamMapMembers}
           hiddenIds={hiddenPlayers}
           onToggle={togglePlayerHidden}
-          hiddenNoteSources={hiddenNoteSources}
-          onToggleNoteSource={toggleNoteSource}
           open={teamPanelOpen}
           onOpenChange={setTeamPanelOpenPersisted}
         />
+        <CustomMarkersPanel
+          markers={customMarkers}
+          hiddenNoteSources={hiddenNoteSources}
+          onToggleNoteSource={toggleNoteSource}
+          open={customMarkersPanelOpen}
+          onOpenChange={setCustomMarkersPanelOpen}
+          placing={placingMarker}
+          onStartPlacing={() => setPlacingMarker(true)}
+          onEdit={setEditingMarker}
+          mutations={customMarkerMutations}
+        />
+        {placingMarker && (
+          <div
+            className="absolute top-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-border bg-card/90 px-3 py-2 text-sm shadow-lg backdrop-blur-sm"
+            onPointerDown={(event) => event.stopPropagation()}
+            onPointerUp={(event) => event.stopPropagation()}
+          >
+            Click on the map to place a marker
+            <Button variant="ghost" size="sm" onClick={() => setPlacingMarker(false)}>
+              Cancel
+            </Button>
+          </div>
+        )}
       </div>
+      {pendingMarkerPosition && (
+        <CustomMarkerDialog
+          title="Add marker"
+          pending={customMarkerMutations.createCustomMarker.isPending}
+          onSave={createCustomMarker}
+          close={() => setPendingMarkerPosition(null)}
+        />
+      )}
+      {viewingMarker && (
+        <CustomMarkerInfoDialog
+          marker={viewingMarker}
+          onEdit={() => {
+            setEditingMarker(viewingMarker);
+            setViewingMarker(null);
+          }}
+          close={() => setViewingMarker(null)}
+        />
+      )}
+      {editingMarker && (
+        <CustomMarkerDialog
+          title="Edit marker"
+          initialName={editingMarker.name}
+          initialDescription={editingMarker.description}
+          pending={customMarkerMutations.updateCustomMarker.isPending}
+          onSave={saveEditedMarker}
+          close={() => setEditingMarker(null)}
+        />
+      )}
       <div className="map-legend">
         <span>
           <i className="map-dot map-dot-team" />
@@ -348,6 +491,10 @@ export function MapView({
         <span>
           <i className="map-dot map-dot-note" />
           Your markers
+        </span>
+        <span>
+          <i className="map-dot map-dot-custom" />
+          Custom markers
         </span>
         <span>
           <i className="map-dot map-dot-death" />

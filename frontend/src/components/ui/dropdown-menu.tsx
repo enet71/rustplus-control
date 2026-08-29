@@ -35,6 +35,7 @@ function DropdownMenuContent({
 function DropdownMenuItem({
   className,
   variant = 'default',
+  onSelect,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Item> & {
   variant?: 'default' | 'destructive';
@@ -47,6 +48,17 @@ function DropdownMenuItem({
         'relative flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none focus:bg-secondary data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4',
         className,
       )}
+      onSelect={
+        onSelect &&
+        // Opening a Dialog synchronously from a menu item's `onSelect` races with
+        // Radix's own menu-close cleanup (focus return, body pointer-events) and can
+        // leave the freshly opened dialog unable to receive clicks — its own Cancel/
+        // Close buttons stop responding. Deferring the callback by a tick lets the
+        // menu finish closing first.
+        ((event: Event) => {
+          setTimeout(() => onSelect(event), 0);
+        })
+      }
       {...props}
     />
   );
