@@ -15,6 +15,7 @@ function DropdownMenuTrigger({
 function DropdownMenuContent({
   className,
   sideOffset = 4,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
   return (
@@ -26,6 +27,15 @@ function DropdownMenuContent({
           'z-50 min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
           className,
         )}
+        onCloseAutoFocus={(event) => {
+          // Every menu item in this app opens a Dialog/AlertDialog next. Radix's
+          // default here returns focus to the (now possibly hidden) trigger button,
+          // which races the newly-mounted dialog's own focus trap and can leave the
+          // dialog unresponsive to clicks (its Cancel/Close stop working). Skip the
+          // default focus return unless the caller opts back in.
+          event.preventDefault();
+          onCloseAutoFocus?.(event);
+        }}
         {...props}
       />
     </DropdownMenuPrimitive.Portal>
