@@ -80,10 +80,10 @@ export class TeamChatCommandService {
     const targetName = (action === null ? command : command.slice(0, -1)).trim();
     if (!targetName) return;
     const targets = this.findChatTargets(targetName);
-    if (!targets.length) {
-      this.sendTeamChatMessage(rustplus, `Switch or group not found: ${targetName}.`);
-      return;
-    }
+    // No matching switch or group: silently ignored rather than replied to, since a
+    // `!`-prefixed chat message that isn't actually a command (e.g. ordinary banter)
+    // would otherwise get an unwanted "not found" reply.
+    if (!targets.length) return;
     if (targets.length > 1) {
       this.sendTeamChatMessage(
         rustplus,

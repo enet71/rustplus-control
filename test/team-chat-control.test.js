@@ -78,13 +78,13 @@ test('team chat commands query and control switches and groups', async () => {
   ]);
 });
 
-test('team chat ignores messages that are not commands and reports unknown targets', () => {
+test('team chat ignores messages that are not commands and silently ignores unknown targets', () => {
   const { control, client, replies } = createControl();
 
   control.teamChat.handleTeamChatMessage(client, { steamId: '1', time: 1, message: 'sw1+' });
   control.teamChat.handleTeamChatMessage(client, { steamId: '1', time: 2, message: '!missing' });
 
-  assert.deepEqual(replies, ['[rust-control] Switch or group not found: missing.']);
+  assert.deepEqual(replies, []);
 });
 
 test('team chat reports switches that failed in a partial group command', async () => {

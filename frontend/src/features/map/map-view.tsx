@@ -9,6 +9,7 @@ import {
 import { MapPin, MapPinPlus, Moon, Skull, Train, TrainFrontTunnel, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { ConfirmDialog } from '../../shared/ui/confirm-dialog';
 import type { DashboardState } from '../../shared/api-types';
 import { CustomMarkerDialog } from './custom-marker-dialog';
 import { CustomMarkerInfoDialog } from './custom-marker-info-dialog';
@@ -100,6 +101,7 @@ export function MapView({
   } | null>(null);
   const [viewingMarker, setViewingMarker] = useState<CustomMarker | null>(null);
   const [editingMarker, setEditingMarker] = useState<CustomMarker | null>(null);
+  const [deletingMarker, setDeletingMarker] = useState<CustomMarker | null>(null);
   const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
   const [hiddenStateServerId, setHiddenStateServerId] = useState(serverId);
 
@@ -115,6 +117,7 @@ export function MapView({
     setPendingMarkerPosition(null);
     setViewingMarker(null);
     setEditingMarker(null);
+    setDeletingMarker(null);
   }
 
   const setTeamPanelOpenPersisted = (open: boolean): void => {
@@ -158,6 +161,16 @@ export function MapView({
       description,
     });
     setEditingMarker(null);
+  };
+
+  const confirmDeleteMarker = async (): Promise<void> => {
+    if (!deletingMarker) return;
+    try {
+      await customMarkerMutations.deleteCustomMarker.mutateAsync(deletingMarker.id);
+      setDeletingMarker(null);
+    } catch {
+      // The mutation reports the failure; the dialog stays open for another attempt.
+    }
   };
 
   const visibleTeamMembers = teamMapMembers.filter((member) => !hiddenPlayers.has(member.id));
@@ -432,7 +445,7 @@ export function MapView({
           placing={placingMarker}
           onStartPlacing={() => setPlacingMarker(true)}
           onEdit={setEditingMarker}
-          mutations={customMarkerMutations}
+          onDelete={setDeletingMarker}
         />
         {placingMarker && (
           <div
@@ -473,6 +486,15 @@ export function MapView({
           pending={customMarkerMutations.updateCustomMarker.isPending}
           onSave={saveEditedMarker}
           close={() => setEditingMarker(null)}
+        />
+      )}
+      {deletingMarker && (
+        <ConfirmDialog
+          title="Delete marker?"
+          description={`Remove "${deletingMarker.name}" from the map?`}
+          pending={customMarkerMutations.deleteCustomMarker.isPending}
+          onConfirm={() => void confirmDeleteMarker()}
+          close={() => setDeletingMarker(null)}
         />
       )}
       <div className="map-legend">
