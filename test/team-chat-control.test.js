@@ -51,13 +51,17 @@ function createControl() {
 test('team chat commands query and control switches and groups', async () => {
   const { control, client, replies, commands } = createControl();
 
-  await control.sendChatTargetState(client, { name: 'SW1', switchIds: ['sw1'], isGroup: false });
-  await control.setChatTargetValue(
+  await control.teamChat.sendChatTargetState(client, {
+    name: 'SW1',
+    switchIds: ['sw1'],
+    isGroup: false,
+  });
+  await control.teamChat.setChatTargetValue(
     client,
     { name: 'SW1', switchIds: ['sw1'], isGroup: false },
     true,
   );
-  await control.setChatTargetValue(
+  await control.teamChat.setChatTargetValue(
     client,
     { name: 'Base', switchIds: ['sw1'], isGroup: true },
     false,
@@ -77,8 +81,8 @@ test('team chat commands query and control switches and groups', async () => {
 test('team chat ignores messages that are not commands and reports unknown targets', () => {
   const { control, client, replies } = createControl();
 
-  control.handleTeamChatMessage(client, { steamId: '1', time: 1, message: 'sw1+' });
-  control.handleTeamChatMessage(client, { steamId: '1', time: 2, message: '!missing' });
+  control.teamChat.handleTeamChatMessage(client, { steamId: '1', time: 1, message: 'sw1+' });
+  control.teamChat.handleTeamChatMessage(client, { steamId: '1', time: 2, message: '!missing' });
 
   assert.deepEqual(replies, ['[rust-control] Switch or group not found: missing.']);
 });
@@ -92,7 +96,7 @@ test('team chat reports switches that failed in a partial group command', async 
       entityId === 'sw2' ? { response: { error: { error: 'rejected' } } } : { response: {} },
     );
   };
-  await control.setChatTargetValue(
+  await control.teamChat.setChatTargetValue(
     client,
     { name: 'Base', switchIds: ['sw1', 'sw2'], isGroup: true },
     true,
@@ -107,15 +111,15 @@ test('team chat reports switches that failed in a partial group command', async 
 
 test('logout stops every polling timer', () => {
   const { control } = createControl();
-  control.markerPolling = setInterval(() => {}, 1000);
-  control.teamPolling = setInterval(() => {}, 1000);
-  control.teamChatPolling = setInterval(() => {}, 1000);
+  control.worldState.markerPolling = setInterval(() => {}, 1000);
+  control.worldState.teamPolling = setInterval(() => {}, 1000);
+  control.teamChat.teamChatPolling = setInterval(() => {}, 1000);
 
   control.logoutFcm();
 
-  assert.equal(control.markerPolling, null);
-  assert.equal(control.teamPolling, null);
-  assert.equal(control.teamChatPolling, null);
+  assert.equal(control.worldState.markerPolling, null);
+  assert.equal(control.worldState.teamPolling, null);
+  assert.equal(control.teamChat.teamChatPolling, null);
 });
 
 test('team chat polling waits for the previous request to finish', () => {
@@ -130,7 +134,7 @@ test('team chat polling waits for the previous request to finish', () => {
   };
 
   try {
-    control.startTeamChatPolling(client);
+    control.teamChat.startTeamChatPolling(client);
     poll();
     assert.equal(callbacks.length, 1);
 
@@ -138,7 +142,7 @@ test('team chat polling waits for the previous request to finish', () => {
     poll();
     assert.equal(callbacks.length, 2);
   } finally {
-    control.stopTeamChatPolling();
+    control.teamChat.stopTeamChatPolling();
     global.setInterval = setIntervalOriginal;
   }
 });

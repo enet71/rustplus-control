@@ -1,7 +1,13 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical } from 'lucide-react';
+import { GripVertical, MoreVertical, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { Toggle } from '../../shared/ui/toggle';
 import type { Device, StorageState } from '../../shared/api-types';
@@ -14,6 +20,7 @@ type DeviceRowProps = {
   pending: boolean;
   onToggle: (device: Device, enabled: boolean) => void;
   onRename: (device: Device) => void;
+  onDelete: (device: Device) => void;
 };
 
 export function deviceStateLabel(
@@ -48,6 +55,7 @@ export function DeviceRow({
   pending,
   onToggle,
   onRename,
+  onDelete,
 }: DeviceRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: device.entityId,
@@ -99,9 +107,25 @@ export function DeviceRow({
             </p>
           </div>
           <div className={cn('flex shrink-0 items-center gap-2', isStorage && 'mt-0.5')}>
-            <Button variant="secondary" onClick={() => onRename(device)}>
-              Rename
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  aria-label={`More actions for ${device.name}`}
+                >
+                  <MoreVertical />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => onRename(device)}>
+                  <Pencil /> Rename
+                </DropdownMenuItem>
+                <DropdownMenuItem variant="destructive" onSelect={() => onDelete(device)}>
+                  <Trash2 /> Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             {device.type === 'switch' && (
               <Toggle
                 name={device.name}

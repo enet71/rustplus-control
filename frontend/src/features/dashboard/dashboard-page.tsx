@@ -203,8 +203,10 @@ export function DashboardPage() {
           </div>
           <div
             className={cn(
-              'min-h-0 flex-1 p-8',
-              view === 'controls' ? 'overflow-y-auto' : 'flex flex-col overflow-hidden',
+              'min-h-0 flex-1',
+              view === 'controls'
+                ? 'overflow-y-auto px-8 pb-8'
+                : 'flex flex-col overflow-hidden p-8',
             )}
           >
             {view === 'controls' ? (
@@ -225,6 +227,7 @@ export function DashboardPage() {
                 serverId={state.config.activeServerId || ''}
                 teamMapMembers={state.teamMapMembers}
                 mapMarkers={state.mapMarkers}
+                mapNotes={state.mapNotes}
                 deathMarkers={state.deathMarkers}
               />
             )}

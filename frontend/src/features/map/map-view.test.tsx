@@ -1,4 +1,5 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { saveAccessToken } from '../../shared/session';
 import { renderWithProviders } from '../../test-utils';
@@ -13,6 +14,7 @@ function renderMap(
   response: () => Response,
   teamMapMembers: DashboardState['teamMapMembers'] = [],
   deathMarkers: DashboardState['deathMarkers'] = [],
+  mapNotes: DashboardState['mapNotes'] = [],
 ) {
   saveAccessToken('access-key');
   vi.stubGlobal(
@@ -24,6 +26,7 @@ function renderMap(
       serverId="server-1"
       teamMapMembers={teamMapMembers}
       mapMarkers={[]}
+      mapNotes={mapNotes}
       deathMarkers={deathMarkers}
     />,
   );
@@ -91,13 +94,14 @@ describe('MapView', () => {
   });
 
   it('labels only online teammates with their name, not sleeping ones', async () => {
-    renderMap(readyMapResponse, [
+    const { container } = renderMap(readyMapResponse, [
       { id: '1', name: 'Awake', x: 10, y: 10, isOnline: true },
       { id: '2', name: 'Asleep', x: 20, y: 20, isOnline: false },
     ]);
+    const markerLayer = () => within(container.querySelector('.map-marker-layer')!);
 
-    await waitFor(() => expect(screen.queryByText('Awake')).not.toBeNull());
-    expect(screen.queryByText('Asleep')).toBeNull();
+    await waitFor(() => expect(markerLayer().queryByText('Awake')).not.toBeNull());
+    expect(markerLayer().queryByText('Asleep')).toBeNull();
   });
 
   it('labels monuments using the display name translated from their token', async () => {
@@ -129,5 +133,134 @@ describe('MapView', () => {
 
     await waitFor(() => expect(screen.queryByTitle(/^Alice died here at /)).not.toBeNull());
     expect(screen.queryByText('Alice')).toBeNull();
+  });
+
+  it('renders markers the player placed in-game from the team info notes', async () => {
+    renderMap(
+      readyMapResponse,
+      [],
+      [],
+      [{ id: 'own:1:100:150', type: 1, x: 100, y: 150, source: 'own' }],
+    );
+
+    await waitFor(() => expect(screen.queryByTitle('Marker placed in-game')).not.toBeNull());
+  });
+
+  it('hides own and leader map-note markers independently', async () => {
+    const user = userEvent.setup();
+    renderMap(
+      readyMapResponse,
+      [],
+      [],
+      [
+        { id: 'own:1:100:150', type: 1, x: 100, y: 150, source: 'own' },
+        { id: 'leader:2:300:350', type: 2, x: 300, y: 350, source: 'leader' },
+      ],
+    );
+    await waitFor(() => expect(screen.getAllByTitle('Marker placed in-game').length).toBe(2));
+
+    await user.click(screen.getByRole('checkbox', { name: 'My markers' }));
+    expect(screen.getAllByTitle('Marker placed in-game').length).toBe(1);
+
+    await user.click(screen.getByRole('checkbox', { name: "Leader's markers" }));
+    expect(screen.queryByTitle('Marker placed in-game')).toBeNull();
+  });
+
+  it('remembers a hidden marker source in local storage across a remount', async () => {
+    const user = userEvent.setup();
+    const notes: DashboardState['mapNotes'] = [
+      { id: 'own:1:100:150', type: 1, x: 100, y: 150, source: 'own' },
+    ];
+    const first = renderMap(readyMapResponse, [], [], notes);
+    await waitFor(() => expect(screen.queryByTitle('Marker placed in-game')).not.toBeNull());
+    await user.click(screen.getByRole('checkbox', { name: 'My markers' }));
+    expect(screen.queryByTitle('Marker placed in-game')).toBeNull();
+    first.unmount();
+
+    renderMap(readyMapResponse, [], [], notes);
+
+    await waitFor(() => expect(screen.queryByText('Teammates')).not.toBeNull());
+    expect(screen.queryByTitle('Marker placed in-game')).toBeNull();
+  });
+
+  it('lists every teammate in the team panel, checked by default', async () => {
+    renderMap(readyMapResponse, [
+      { id: '1', name: 'Awake', x: 10, y: 10, isOnline: true },
+      { id: '2', name: 'Asleep', x: 20, y: 20, isOnline: false },
+    ]);
+
+    await waitFor(() => expect(screen.queryByText('Teammates')).not.toBeNull());
+    expect(screen.getByRole('checkbox', { name: 'Awake' }).getAttribute('data-state')).toBe(
+      'checked',
+    );
+    expect(screen.getByRole('checkbox', { name: 'Asleep' }).getAttribute('data-state')).toBe(
+      'checked',
+    );
+  });
+
+  it("hides a teammate's map marker and death markers once unchecked, keeping them in the panel", async () => {
+    const user = userEvent.setup();
+    renderMap(
+      readyMapResponse,
+      [{ id: '1', name: 'Alice', x: 10, y: 10, isOnline: true }],
+      [{ id: '1:100', playerId: '1', name: 'Alice', x: 30, y: 40, deathTime: 1_700_000_000 }],
+    );
+    await waitFor(() => expect(screen.queryByTitle('Alice')).not.toBeNull());
+    expect(screen.queryByTitle(/^Alice died here at /)).not.toBeNull();
+
+    await user.click(screen.getByRole('checkbox', { name: 'Alice' }));
+
+    expect(screen.queryByTitle('Alice')).toBeNull();
+    expect(screen.queryByTitle(/^Alice died here at /)).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Alice' }).getAttribute('data-state')).toBe(
+      'unchecked',
+    );
+  });
+
+  it('remembers a hidden teammate in local storage across a remount', async () => {
+    const user = userEvent.setup();
+    const first = renderMap(readyMapResponse, [
+      { id: '1', name: 'Alice', x: 10, y: 10, isOnline: true },
+    ]);
+    await waitFor(() => expect(screen.queryByTitle('Alice')).not.toBeNull());
+    await user.click(screen.getByRole('checkbox', { name: 'Alice' }));
+    expect(screen.queryByTitle('Alice')).toBeNull();
+    first.unmount();
+
+    renderMap(readyMapResponse, [{ id: '1', name: 'Alice', x: 10, y: 10, isOnline: true }]);
+
+    await waitFor(() => expect(screen.queryByText('Teammates')).not.toBeNull());
+    expect(screen.queryByTitle('Alice')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Alice' }).getAttribute('data-state')).toBe(
+      'unchecked',
+    );
+  });
+
+  it('can hide and reopen the team panel', async () => {
+    const user = userEvent.setup();
+    renderMap(readyMapResponse, [{ id: '1', name: 'Alice', x: 10, y: 10, isOnline: true }]);
+    await waitFor(() => expect(screen.queryByText('Teammates')).not.toBeNull());
+
+    await user.click(screen.getByRole('button', { name: 'Hide team panel' }));
+    expect(screen.queryByText('Teammates')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Show team panel' }));
+    expect(screen.queryByText('Teammates')).not.toBeNull();
+  });
+
+  it('remembers the panel being hidden in local storage across a remount', async () => {
+    const user = userEvent.setup();
+    const first = renderMap(readyMapResponse, [
+      { id: '1', name: 'Alice', x: 10, y: 10, isOnline: true },
+    ]);
+    await waitFor(() => expect(screen.queryByText('Teammates')).not.toBeNull());
+    await user.click(screen.getByRole('button', { name: 'Hide team panel' }));
+    first.unmount();
+
+    renderMap(readyMapResponse, [{ id: '1', name: 'Alice', x: 10, y: 10, isOnline: true }]);
+
+    await waitFor(() => expect(screen.queryByAltText('Rust server map')).not.toBeNull());
+    expect(screen.queryByText('Teammates')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Show team panel' })).not.toBeNull();
   });
 });

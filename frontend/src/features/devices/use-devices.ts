@@ -55,6 +55,19 @@ export function useDeviceMutations(report: (message: string) => void) {
     onError,
   });
 
+  const deleteDevice = useMutation({
+    mutationFn: (entityId: string) =>
+      api(`/api/devices/${encodeURIComponent(entityId)}`, { method: 'DELETE' }),
+    onSuccess,
+    onError,
+  });
+
+  const deleteGroup = useMutation({
+    mutationFn: (id: string) => api(`/api/groups/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess,
+    onError,
+  });
+
   const reorderItems = useMutation({
     mutationFn: (order: OrderEntry[]) =>
       api('/api/items/reorder', {
@@ -70,6 +83,8 @@ export function useDeviceMutations(report: (message: string) => void) {
     setGroupEnabled,
     renameDevice,
     saveGroup,
+    deleteDevice,
+    deleteGroup,
     reorderItems,
     isDevicePending: (entityId: string) =>
       setDeviceEnabled.isPending && setDeviceEnabled.variables?.entityId === entityId,

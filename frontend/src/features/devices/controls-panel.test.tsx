@@ -12,6 +12,8 @@ function fakeMutations(overrides: Partial<DeviceMutations> = {}): DeviceMutation
     setGroupEnabled: { mutate: vi.fn(), isPending: false, variables: undefined },
     renameDevice: { mutate: vi.fn(), isPending: false },
     saveGroup: { mutate: vi.fn(), isPending: false },
+    deleteDevice: { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false },
+    deleteGroup: { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false },
     reorderItems: { mutate: vi.fn(), isPending: false },
     isDevicePending: () => false,
     isGroupPending: () => false,
@@ -131,6 +133,51 @@ describe('ControlsPanel group collapsing', () => {
     expect(
       screen.getByRole('button', { name: 'Collapse group' }).getAttribute('aria-expanded'),
     ).toBe('false');
+  });
+});
+
+describe('ControlsPanel row actions menu', () => {
+  it('deletes a device only after confirming in the dialog', async () => {
+    const user = userEvent.setup();
+    const { mutations } = panel({ devices: [device('sw1', 'switch')] });
+
+    await user.click(screen.getByRole('button', { name: 'More actions for Device sw1' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+
+    expect(screen.getByRole('heading', { name: 'Delete device?' })).not.toBeNull();
+    expect(mutations.deleteDevice.mutateAsync).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(mutations.deleteDevice.mutateAsync).toHaveBeenCalledWith('sw1');
+  });
+
+  it('cancelling the confirm dialog does not delete the device', async () => {
+    const user = userEvent.setup();
+    const { mutations } = panel({ devices: [device('sw1', 'switch')] });
+
+    await user.click(screen.getByRole('button', { name: 'More actions for Device sw1' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('heading', { name: 'Delete device?' })).toBeNull();
+    expect(mutations.deleteDevice.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('deletes a group only after confirming in the dialog', async () => {
+    const user = userEvent.setup();
+    const groups: DeviceGroup[] = [
+      { id: 'g1', name: 'Base lights', deviceIds: ['sw1'], sortOrder: 0 },
+    ];
+    const { mutations } = panel({ devices: [device('sw1', 'switch')], groups });
+
+    await user.click(screen.getByRole('button', { name: 'More actions for Base lights' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+
+    expect(screen.getByRole('heading', { name: 'Delete group?' })).not.toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(mutations.deleteGroup.mutateAsync).toHaveBeenCalledWith('g1');
   });
 });
 

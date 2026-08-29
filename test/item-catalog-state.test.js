@@ -44,7 +44,7 @@ test('state uses catalog icons for devices and storage items', () => {
     getDeviceIcon: () => catalogItem,
   };
   const control = new RustplusControlService(repository, process.cwd(), false, catalog);
-  control.storageStates = {
+  control.deviceState.storageStates = {
     storage: { capacity: 12, items: [{ itemId: -123, quantity: 5, itemIsBlueprint: false }] },
   };
 
@@ -91,6 +91,51 @@ test('reorderTopLevel assigns sortOrder from the given order', () => {
   assert.equal(state.config.groups.find((group) => group.id === 'g1').sortOrder, 1);
 });
 
+test('deleteDevice removes the device and drops it from any groups, dropping groups left empty', () => {
+  const repository = {
+    migrateLegacyFcmConfig() {},
+    loadConfig() {
+      return {
+        activeServerId: 'server',
+        servers: [
+          {
+            id: 'server',
+            name: 'Server',
+            server: {},
+            devices: [
+              { entityId: 'a', name: 'A', type: 'switch' },
+              { entityId: 'b', name: 'B', type: 'switch' },
+            ],
+            groups: [
+              { id: 'mixed', name: 'Mixed', deviceIds: ['a', 'b'] },
+              { id: 'solo', name: 'Solo', deviceIds: ['a'] },
+            ],
+          },
+        ],
+      };
+    },
+    hasFcmConfig() {
+      return false;
+    },
+    saveConfig() {},
+  };
+  const control = new RustplusControlService(repository, process.cwd(), false);
+
+  assert.equal(control.deleteDevice('a'), true);
+  assert.equal(control.deleteDevice('missing'), false);
+
+  const state = control.getState();
+  assert.deepEqual(
+    state.config.devices.map((device) => device.entityId),
+    ['b'],
+  );
+  assert.deepEqual(
+    state.config.groups.map((group) => group.id),
+    ['mixed'],
+  );
+  assert.deepEqual(state.config.groups[0].deviceIds, ['b']);
+});
+
 test('storage monitor refreshes after a pipe change pulse without items', () => {
   const repository = {
     migrateLegacyFcmConfig() {},
@@ -113,7 +158,7 @@ test('storage monitor refreshes after a pipe change pulse without items', () => 
     },
   };
   const control = new RustplusControlService(repository, process.cwd(), false);
-  control.storageStates = {
+  control.deviceState.storageStates = {
     storage: { capacity: 12, items: [{ itemId: 1, quantity: 3, itemIsBlueprint: false }] },
   };
   const client = {
@@ -179,10 +224,12 @@ test('storage monitors are polled when broadcasts are absent', () => {
   control.client = client;
   control.status = { connected: true, message: 'Connected' };
 
-  control.startStoragePolling(client, [{ entityId: 'storage', name: 'Locker', type: 'storage' }]);
+  control.deviceState.startStoragePolling(client, [
+    { entityId: 'storage', name: 'Locker', type: 'storage' },
+  ]);
 
   assert.equal(control.getState().storageStates.storage.items[0].quantity, 8);
-  control.stopStoragePolling();
+  control.deviceState.stopStoragePolling();
 });
 
 test('map markers exclude AppMarkerType.Player entries already covered by team info', () => {
@@ -213,13 +260,54 @@ test('map markers exclude AppMarkerType.Player entries already covered by team i
   control.client = client;
   control.status = { connected: true, message: 'Connected' };
 
-  control.startMarkerPolling();
+  control.worldState.startMarkerPolling();
 
   assert.deepEqual(
     control.getState().mapMarkers.map((marker) => marker.id),
     ['2'],
   );
-  control.stopMarkerPolling();
+  control.worldState.stopMarkerPolling();
+});
+
+test('team info exposes player-placed map notes, from both the member and the leader', () => {
+  const repository = {
+    migrateLegacyFcmConfig() {},
+    loadConfig() {
+      return { activeServerId: 'server', servers: [] };
+    },
+    hasFcmConfig() {
+      return false;
+    },
+  };
+  const control = new RustplusControlService(repository, process.cwd(), false);
+  const client = {
+    getTeamInfo(callback) {
+      callback({
+        response: {
+          teamInfo: {
+            members: [],
+            mapNotes: [{ type: 1, x: 100, y: 150 }],
+            leaderMapNotes: [{ type: 2, x: 300, y: 350 }],
+          },
+        },
+      });
+    },
+  };
+  control.client = client;
+  control.status = { connected: true, message: 'Connected' };
+
+  control.worldState.startTeamPolling();
+
+  assert.deepEqual(
+    control
+      .getState()
+      .mapNotes.map((note) => ({ type: note.type, x: note.x, y: note.y, source: note.source })),
+    [
+      { type: 1, x: 100, y: 150, source: 'own' },
+      { type: 2, x: 300, y: 350, source: 'leader' },
+    ],
+  );
+  control.worldState.stopTeamPolling();
 });
 
 test('team members get Steam avatars fetched and cached for the next poll', async () => {
@@ -256,17 +344,17 @@ test('team members get Steam avatars fetched and cached for the next poll', asyn
   });
 
   try {
-    control.startTeamPolling();
+    control.worldState.startTeamPolling();
     assert.equal(control.getState().teamMapMembers[0].avatarUrl, undefined);
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    control.startTeamPolling();
+    control.worldState.startTeamPolling();
     assert.equal(control.getState().teamMapMembers[0].avatarUrl, 'https://avatar.example/123.jpg');
   } finally {
     global.fetch = originalFetch;
-    control.stopTeamPolling();
+    control.worldState.stopTeamPolling();
   }
 });
 
@@ -314,7 +402,7 @@ test('keeps only the two most recent death locations per player', () => {
   };
 
   try {
-    control.startTeamPolling();
+    control.worldState.startTeamPolling();
     intervals[0]();
     intervals[0]();
     intervals[0]();
@@ -330,7 +418,7 @@ test('keeps only the two most recent death locations per player', () => {
     );
   } finally {
     global.setInterval = originalSetInterval;
-    control.stopTeamPolling();
+    control.worldState.stopTeamPolling();
   }
 });
 
@@ -345,7 +433,7 @@ test('player-death events include the grid square the death happened in', () => 
     },
   };
   const control = new RustplusControlService(repository, process.cwd(), false);
-  control.map = {
+  control.worldState.map = {
     mapSize: 300,
     width: 2000,
     height: 2000,
@@ -378,7 +466,7 @@ test('player-death events include the grid square the death happened in', () => 
   };
 
   try {
-    control.startTeamPolling();
+    control.worldState.startTeamPolling();
     intervals[0]();
 
     const deathEvent = written
@@ -387,7 +475,7 @@ test('player-death events include the grid square the death happened in', () => 
     assert.equal(deathEvent.body, 'Alice died in A2');
   } finally {
     global.setInterval = originalSetInterval;
-    control.stopTeamPolling();
+    control.worldState.stopTeamPolling();
   }
 });
 
@@ -420,7 +508,9 @@ test('device state loading retries the same device after a Rust+ rate limit', ()
   control.status = { connected: true, message: 'Connected' };
 
   try {
-    control.loadDeviceStates(client, [{ entityId: 'switch', name: 'Switch', type: 'switch' }]);
+    control.deviceState.loadDeviceStates(client, [
+      { entityId: 'switch', name: 'Switch', type: 'switch' },
+    ]);
     callbacks[0]({ response: { error: { error: 'rate_limit' } } });
 
     assert.deepEqual(requestedIds, ['switch']);
@@ -429,7 +519,7 @@ test('device state loading retries the same device after a Rust+ rate limit', ()
     timers[0].callback();
     assert.deepEqual(requestedIds, ['switch', 'switch']);
   } finally {
-    control.stopDeviceStateLoading();
+    control.deviceState.stopDeviceStateLoading();
     global.setTimeout = setTimeoutOriginal;
   }
 });
@@ -475,7 +565,7 @@ test('Rust+ map image is exposed with its coordinate metadata', () => {
   };
   control.client = client;
 
-  control.loadMap(client);
+  control.worldState.loadMap(client);
 
   assert.deepEqual(control.getMap(), {
     width: 4500,
@@ -530,7 +620,7 @@ test('map loading retries after a Rust+ rate limit instead of giving up', () => 
   control.client = client;
 
   try {
-    control.loadMap(client);
+    control.worldState.loadMap(client);
 
     assert.equal(getInfoCalls, 1);
     assert.equal(control.getMap(), null);
@@ -565,15 +655,15 @@ test('polling listeners start before the device state queue', () => {
   const control = new RustplusControlService(repository, process.cwd(), false);
   const calls = [];
   const client = {};
-  control.loadMap = () => calls.push('map');
-  control.startMarkerPolling = () => calls.push('markers');
-  control.startTeamPolling = () => calls.push('team');
-  control.startTeamChatPolling = () => calls.push('chat');
-  control.startStoragePolling = () => calls.push('storage');
-  control.loadDeviceStates = () => calls.push('controls');
+  control.worldState.loadMap = () => calls.push('map');
+  control.worldState.startMarkerPolling = () => calls.push('markers');
+  control.worldState.startTeamPolling = () => calls.push('team');
+  control.teamChat.startTeamChatPolling = () => calls.push('chat');
+  control.deviceState.startStoragePolling = () => calls.push('storage');
+  control.deviceState.loadDeviceStates = () => calls.push('controls');
 
   control.startPollingListeners(client, []);
-  control.loadDeviceStates(client, []);
+  control.deviceState.loadDeviceStates(client, []);
 
   assert.deepEqual(calls, ['map', 'markers', 'team', 'chat', 'storage', 'controls']);
 });

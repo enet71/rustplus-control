@@ -139,6 +139,15 @@
 .map-marker.event {
   background: var(--destructive);
 }
+.map-marker.note {
+  display: flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  background: #3b82f6;
+  color: #fff;
+}
 .map-marker.death {
   display: flex;
   width: 18px;
@@ -195,6 +204,9 @@
 }
 .map-dot-marker {
   background: var(--warning);
+}
+.map-dot-note {
+  background: #3b82f6;
 }
 .map-dot-monument {
   background: color-mix(in srgb, var(--foreground) 25%, var(--card));

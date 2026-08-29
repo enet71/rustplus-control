@@ -40,6 +40,13 @@ export function createDeviceRouter(control: RustplusControlService): Router {
       ? response.json({ ok: true })
       : response.status(404).json({ error: 'Unknown device.' });
   });
+  router.delete('/devices/:entityId', (request, response) => {
+    if (!control.getActiveProfile())
+      return response.status(404).json({ error: 'No active server.' });
+    return control.deleteDevice(String(request.params.entityId))
+      ? response.status(204).end()
+      : response.status(404).json({ error: 'Unknown device.' });
+  });
 
   router.post('/groups', (request, response) => {
     const profile = control.getActiveProfile();

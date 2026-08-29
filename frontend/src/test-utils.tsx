@@ -29,6 +29,7 @@ export function dashboardState(overrides: Partial<DashboardState> = {}): Dashboa
     deviceStates: {},
     storageStates: {},
     mapMarkers: [],
+    mapNotes: [],
     teamMapMembers: [],
     deathMarkers: [],
     config: {

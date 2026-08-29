@@ -29,6 +29,7 @@ export type DashboardState = {
   deviceStates: Record<string, boolean | undefined>;
   storageStates: Record<string, StorageState | undefined>;
   mapMarkers: MapPoint[];
+  mapNotes: Array<MapPoint & { source: 'own' | 'leader' }>;
   teamMapMembers: Array<
     MapPoint & { id: string; name: string; isOnline: boolean; avatarUrl?: string }
   >;

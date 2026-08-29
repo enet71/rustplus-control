@@ -1,6 +1,4 @@
-﻿import crypto from 'node:crypto';
-import path from 'node:path';
-import { spawn, type ChildProcess } from 'node:child_process';
+import crypto from 'node:crypto';
 import type { Response } from 'express';
 import { ConfigRepository } from '../repositories/config-repository';
 import type {
@@ -13,130 +11,33 @@ import type {
   PendingPairing,
   RustEvent,
   ServerProfile,
-  StorageState,
 } from '../types';
 import { RustItemCatalog } from './rust-item-catalog';
+import { DeviceStateService } from './rustplus/device-state-service';
+import { postDiscordAlarm } from './rustplus/discord-notifier';
+import { FcmProcessManager } from './rustplus/fcm-process-manager';
+import { setRustEntityValue } from './rustplus/rust-entity-client';
+import { errorSummary, logRust } from './rustplus/rust-log';
+import { TeamChatCommandService } from './rustplus/team-chat-command-service';
+import { WorldStateService, type RustMap } from './rustplus/world-state-service';
 
 const RustPlus: any = require('@liamcottle/rustplus.js');
 const RECONNECT_DELAY_MS = 5000;
-const DEVICE_STATE_REQUEST_DELAY_MS = 1000;
-const DEVICE_STATE_RATE_LIMIT_RETRY_MS = 5000;
-const MAP_LOAD_RETRY_MS = 5000;
-const STORAGE_POLLING_INTERVAL_MS = 5000;
-const TEAM_CHAT_POLLING_INTERVAL_MS = 3000;
-const TEAM_CHAT_REQUEST_TIMEOUT_MS = 10000;
-const TEAM_CHAT_SEEN_LIMIT = 500;
-const TEAM_CHAT_MESSAGE_PREFIX = '[rust-control]';
-/** AppMarkerType.Player: teammates already come from getTeamInfo, so map markers exclude them. */
-const MARKER_TYPE_PLAYER = 1;
-const STEAM_AVATAR_CACHE_MS = 60 * 60 * 1000;
 
 type SwitchCommandResult = 'not-connected' | 'unknown' | 'no-switches' | 'failed' | null;
-type TeamChatRequest = { rustplus: any; timeout: NodeJS.Timeout | null };
-type ChatTarget = { name: string; switchIds: string[]; isGroup: boolean };
-type MapMarker = { id: string; type: number; x: number; y: number; name: string };
-type TeamMapMember = {
-  id: string;
-  name: string;
-  x: number;
-  y: number;
-  isOnline: boolean;
-  avatarUrl?: string;
-};
-type SteamAvatarEntry = { url: string; expiresAt: number };
-type DeathMarker = {
-  id: string;
-  playerId: string;
-  name: string;
-  x: number;
-  y: number;
-  deathTime: number;
-};
-const DEATH_MARKERS_PER_PLAYER = 2;
-/** Matches the grid cell size the map overlay draws in `map-geometry.ts`, so a
- *  death's grid square lines up with the square the player sees on the map. */
-const GRID_CELL_SIZE = 150;
-type RustMonument = { token: string; x: number; y: number };
-type RustMap = {
-  width: number;
-  height: number;
-  oceanMargin: number;
-  mapSize: number;
-  image: string;
-  monuments: RustMonument[];
-};
-
-/** Rust grid column names: A, B, ... Z, AA, AB, ... */
-function gridColumnLabel(index: number): string {
-  let value = index + 1;
-  let name = '';
-  while (value) {
-    name = String.fromCharCode(65 + ((value - 1) % 26)) + name;
-    value = Math.floor((value - 1) / 26);
-  }
-  return name;
-}
-
-/** Grid square (e.g. "K14") a world position falls into, matching the labels the
- *  map overlay draws in `map-geometry.ts`'s `gridCellLabel`. */
-function gridSquareLabel(mapSize: number, x: number, y: number): string | null {
-  if (!Number.isFinite(mapSize) || mapSize <= 0 || !Number.isFinite(x) || !Number.isFinite(y))
-    return null;
-  const columns = Math.ceil(mapSize / GRID_CELL_SIZE);
-  const column = Math.min(columns - 1, Math.max(0, Math.floor(x / GRID_CELL_SIZE)));
-  const row = Math.min(columns - 1, Math.max(0, Math.floor((mapSize - y) / GRID_CELL_SIZE)));
-  return `${gridColumnLabel(column)}${row + 1}`;
-}
-
-function errorSummary(error: unknown): string {
-  const value = error as { name?: unknown; message?: unknown } | null;
-  const name = value?.name || 'Error';
-  const message = String(value?.message || '')
-    .replace(/[\r\n]+/g, ' ')
-    .slice(0, 240);
-  return message ? `${name}: ${message}` : String(name);
-}
-
-function logRust(event: string): void {
-  console.log(`[rustplus] ${event}`);
-}
-
-function isRateLimitError(responseError: unknown): boolean {
-  return String((responseError as { error?: unknown } | null)?.error || '')
-    .toLowerCase()
-    .includes('rate_limit');
-}
 
 export class RustplusControlService {
-  private readonly fcmCliPath: string;
-  private readonly fcmListenerPath: string;
   private client: any = null;
   private status: ConnectionStatus = { connected: false, message: 'Not configured' };
   private config: AppConfig;
-  private deviceStates: Record<string, boolean> = {};
-  private storageStates: Record<string, StorageState> = {};
-  private markerSnapshots = new Map<string, string>();
-  private mapMarkers: MapMarker[] = [];
-  private teamMapMembers: TeamMapMember[] = [];
-  private deathMarkers: DeathMarker[] = [];
-  private readonly steamAvatarCache = new Map<string, SteamAvatarEntry>();
-  private readonly steamAvatarFetchInFlight = new Set<string>();
-  private map: RustMap | null = null;
-  private teamDeaths = new Map<string, number>();
   private readonly eventClients = new Set<Response>();
-  private markerPolling: NodeJS.Timeout | null = null;
-  private teamPolling: NodeJS.Timeout | null = null;
-  private teamChatPolling: NodeJS.Timeout | null = null;
-  private storagePolling: NodeJS.Timeout | null = null;
-  private deviceStateLoadingTimer: NodeJS.Timeout | null = null;
-  private mapLoadTimer: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
-  private fcmRegisterProcess: ChildProcess | null = null;
-  private fcmListenerProcess: ChildProcess | null = null;
-  private fcmStatus: FcmStatus;
   private readonly pendingPairings = new Map<string, PendingPairing>();
-  private readonly processedTeamChatMessages = new Set<string>();
-  private teamChatRequest: TeamChatRequest | null = null;
+
+  private readonly fcmProcess: FcmProcessManager;
+  private readonly worldState: WorldStateService;
+  private readonly deviceState: DeviceStateService;
+  private readonly teamChat: TeamChatCommandService;
 
   constructor(
     private readonly repository: ConfigRepository,
@@ -149,25 +50,35 @@ export class RustplusControlService {
   ) {
     this.repository.migrateLegacyFcmConfig();
     this.config = this.repository.loadConfig();
-    this.fcmStatus = {
-      registered: this.repository.hasFcmConfig(),
-      listening: false,
-      message: 'Not registered',
-    };
-    this.fcmCliPath = path.join(
+    this.fcmProcess = new FcmProcessManager(
       rootDirectory,
-      'node_modules',
-      '@liamcottle',
-      'rustplus.js',
-      'cli',
-      'index.js',
+      this.repository.fcmConfigPath,
+      () => this.repository.hasFcmConfig(),
+      (data) => this.handlePairing(data),
+      this.repository.hasFcmConfig(),
     );
-    this.fcmListenerPath = path.join(rootDirectory, 'scripts', 'fcm-listen.js');
+    this.worldState = new WorldStateService(
+      () => this.client,
+      () => this.status,
+      (event) => this.publishEvent(event),
+      () => this.config.steamApiKey,
+    );
+    this.deviceState = new DeviceStateService(
+      () => this.client,
+      () => this.status,
+      this.itemCatalog,
+    );
+    this.teamChat = new TeamChatCommandService(
+      () => this.activeProfile(),
+      () => this.client,
+      () => this.status,
+      (entityId, value) => this.deviceState.publishEntityState(entityId, value),
+    );
   }
 
   start(): void {
-    if (this.fcmStatus.registered) {
-      this.startFcmListener();
+    if (this.fcmProcess.getStatus().registered) {
+      this.fcmProcess.startListener();
       this.connect();
     } else {
       this.status = { connected: false, message: 'Log in to connect Rust+' };
@@ -178,21 +89,22 @@ export class RustplusControlService {
     return {
       ...this.status,
       config: this.publicConfig(),
-      deviceStates: this.deviceStates,
-      storageStates: this.publicStorageStates(),
-      mapMarkers: this.mapMarkers,
-      teamMapMembers: this.teamMapMembers,
-      deathMarkers: this.deathMarkers,
-      mapReady: Boolean(this.map),
+      deviceStates: this.deviceState.getDeviceStates(),
+      storageStates: this.deviceState.publicStorageStates(),
+      mapMarkers: this.worldState.getMapMarkers(),
+      mapNotes: this.worldState.getMapNotes(),
+      teamMapMembers: this.worldState.getTeamMapMembers(),
+      deathMarkers: this.worldState.getDeathMarkers(),
+      mapReady: Boolean(this.worldState.getMap()),
     };
   }
 
   getMap(): RustMap | null {
-    return this.map;
+    return this.worldState.getMap();
   }
 
   getFcmStatus(): FcmStatus & { registrationAvailable: boolean } {
-    return { ...this.fcmStatus, registrationAvailable: this.registrationAvailable };
+    return { ...this.fcmProcess.getStatus(), registrationAvailable: this.registrationAvailable };
   }
 
   getSettings(): Record<string, unknown> | null {
@@ -225,9 +137,8 @@ export class RustplusControlService {
 
   saveSettings(profile: ServerProfile): void {
     this.setActiveProfile(profile);
-    this.restartFcmListener();
-    this.deviceStates = {};
-    this.storageStates = {};
+    this.fcmProcess.restartListener();
+    this.deviceState.reset();
     this.connect();
   }
 
@@ -237,31 +148,26 @@ export class RustplusControlService {
 
   registerFcm(): boolean {
     if (!this.registrationAvailable) return false;
-    this.startFcmRegister();
+    this.fcmProcess.startRegister(() => this.connect());
     return true;
   }
 
   logoutFcm(): void {
     this.cancelReconnect();
-    this.stopDeviceStateLoading();
-    this.stopStoragePolling();
-    this.stopMarkerPolling();
-    this.stopTeamPolling();
-    this.stopTeamChatPolling();
-    this.fcmRegisterProcess?.kill();
-    this.fcmListenerProcess?.kill();
-    this.fcmRegisterProcess = null;
-    this.fcmListenerProcess = null;
+    this.deviceState.stopDeviceStateLoading();
+    this.deviceState.stopStoragePolling();
+    this.worldState.stopMarkerPolling();
+    this.worldState.stopTeamPolling();
+    this.teamChat.stopTeamChatPolling();
+    this.fcmProcess.stopAll();
     this.repository.deleteFcmConfigs();
     this.pendingPairings.clear();
     if (this.client) this.client.disconnect();
     this.client = null;
-    this.deviceStates = {};
-    this.storageStates = {};
-    this.clearMapState();
-    this.deathMarkers = [];
+    this.deviceState.reset();
+    this.worldState.clearMapState();
+    this.worldState.clearDeathHistory();
     this.status = { connected: false, message: 'Log in to connect Rust+' };
-    this.fcmStatus = { registered: false, listening: false, message: 'Not registered' };
   }
 
   getPendingPairings(): PendingPairing[] {
@@ -286,11 +192,10 @@ export class RustplusControlService {
     const profile = this.config.servers.find((item) => item.id === id);
     if (!profile) return false;
     this.saveConfig({ ...this.config, activeServerId: profile.id });
-    this.deviceStates = {};
-    this.storageStates = {};
-    this.clearMapState();
-    this.deathMarkers = [];
-    if (this.fcmStatus.registered) this.connect();
+    this.deviceState.reset();
+    this.worldState.clearMapState();
+    this.worldState.clearDeathHistory();
+    if (this.fcmProcess.getStatus().registered) this.connect();
     else this.status = { connected: false, message: 'Log in to connect Rust+' };
     return true;
   }
@@ -332,8 +237,7 @@ export class RustplusControlService {
       devices: input.devices,
       groups: this.reconcileGroups(profile.groups, input.devices),
     });
-    this.deviceStates = {};
-    this.storageStates = {};
+    this.deviceState.reset();
     this.connect();
   }
 
@@ -346,9 +250,9 @@ export class RustplusControlService {
     )
       return 'unknown';
     const rustplus = this.client;
-    if (!(await this.setRustEntityValue(rustplus, entityId, enabled))) return 'failed';
+    if (!(await setRustEntityValue(rustplus, entityId, enabled))) return 'failed';
     if (this.client !== rustplus) return 'not-connected';
-    this.publishEntityState(entityId, enabled);
+    this.deviceState.publishEntityState(entityId, enabled);
     return null;
   }
 
@@ -360,6 +264,18 @@ export class RustplusControlService {
       devices: profile.devices.map((device) =>
         device.entityId === entityId ? { ...device, name } : device,
       ),
+    });
+    return true;
+  }
+
+  deleteDevice(entityId: string): boolean {
+    const profile = this.activeProfile();
+    if (!profile || !profile.devices.some((device) => device.entityId === entityId)) return false;
+    const devices = profile.devices.filter((device) => device.entityId !== entityId);
+    this.setActiveProfile({
+      ...profile,
+      devices,
+      groups: this.reconcileGroups(profile.groups, devices),
     });
     return true;
   }
@@ -378,8 +294,7 @@ export class RustplusControlService {
     const profile = this.activeProfile();
     if (!profile) return false;
     this.setActiveProfile({ ...profile, devices: backup.devices, groups: backup.groups });
-    this.deviceStates = {};
-    this.storageStates = {};
+    this.deviceState.reset();
     this.connect();
     return true;
   }
@@ -432,12 +347,12 @@ export class RustplusControlService {
     const results = await Promise.all(
       switchIds.map(async (entityId) => ({
         entityId,
-        succeeded: await this.setRustEntityValue(rustplus, entityId, enabled),
+        succeeded: await setRustEntityValue(rustplus, entityId, enabled),
       })),
     );
     if (this.client !== rustplus) return 'not-connected';
     for (const result of results)
-      if (result.succeeded) this.publishEntityState(result.entityId, enabled);
+      if (result.succeeded) this.deviceState.publishEntityState(result.entityId, enabled);
     if (results.some((result) => !result.succeeded)) return 'failed';
     return null;
   }
@@ -504,28 +419,6 @@ export class RustplusControlService {
     };
   }
 
-  private publicStorageStates(): Record<string, StorageState> {
-    return Object.fromEntries(
-      Object.entries(this.storageStates).map(([entityId, storage]) => [
-        entityId,
-        {
-          ...storage,
-          items: storage.items.map((item) => ({
-            ...item,
-            item: this.itemCatalog.get(item.itemId) || undefined,
-          })),
-        },
-      ]),
-    );
-  }
-
-  private clearMapState(): void {
-    this.stopMapLoading();
-    this.map = null;
-    this.mapMarkers = [];
-    this.teamMapMembers = [];
-  }
-
   private reconcileGroups(groups: DeviceGroup[], devices: Device[]): DeviceGroup[] {
     const deviceIds = new Set(devices.map((device) => device.entityId));
     return groups
@@ -552,42 +445,6 @@ export class RustplusControlService {
     );
   }
 
-  private publishEntityState(entityId: string, value: boolean): void {
-    this.deviceStates[String(entityId)] = Boolean(value);
-  }
-
-  private publishStorageState(
-    entityId: string,
-    payload: { capacity?: unknown; items?: unknown },
-  ): void {
-    if (!Array.isArray(payload.items)) return;
-    const items = payload.items.map((item: any) => ({
-      itemId: Number(item.itemId),
-      quantity: Number(item.quantity),
-      itemIsBlueprint: Boolean(item.itemIsBlueprint),
-    }));
-    const capacity = Number(payload.capacity);
-    this.storageStates[String(entityId)] = {
-      capacity: Number.isFinite(capacity)
-        ? capacity
-        : (this.storageStates[String(entityId)]?.capacity ?? 0),
-      items,
-    };
-  }
-
-  private refreshStorageState(rustplus: any, entityId: string): void {
-    try {
-      rustplus.getEntityInfo(String(entityId), (message: any) => {
-        if (this.client !== rustplus) return true;
-        if (!message.response?.error)
-          this.publishStorageState(entityId, message.response?.entityInfo?.payload || {});
-        return true;
-      });
-    } catch (error) {
-      logRust(`storage state refresh failed: ${errorSummary(error)}`);
-    }
-  }
-
   private handleEntityChanged(rustplus: any, message: any): void {
     const changed = message.broadcast?.entityChanged;
     const payload = changed?.payload;
@@ -595,14 +452,14 @@ export class RustplusControlService {
     const entityId = String(changed.entityId);
     const device = this.activeProfile()?.devices.find((item) => item.entityId === entityId);
     if (device?.type === 'storage') {
-      if (Array.isArray(payload.items)) this.publishStorageState(entityId, payload);
+      if (Array.isArray(payload.items)) this.deviceState.publishStorageState(entityId, payload);
       // Pipe changes may only emit an on/off pulse, without an item payload.
-      else if (payload.value === false) this.refreshStorageState(rustplus, entityId);
+      else if (payload.value === false) this.deviceState.refreshStorageState(rustplus, entityId);
       return;
     }
     if (typeof payload.value !== 'boolean') return;
-    const wasActive = this.deviceStates[entityId];
-    this.publishEntityState(entityId, payload.value);
+    const wasActive = this.deviceState.getDeviceState(entityId);
+    this.deviceState.publishEntityState(entityId, payload.value);
     if (device?.type === 'alarm' && payload.value && !wasActive) {
       this.publishEvent({
         id: `${entityId}:${Date.now()}`,
@@ -712,650 +569,18 @@ export class RustplusControlService {
     }
   }
 
-  private startFcmListener(): void {
-    if (this.fcmListenerProcess) return;
-    const listener = spawn(
-      process.execPath,
-      [this.fcmListenerPath, this.repository.fcmConfigPath],
-      { cwd: this.rootDirectory },
-    );
-    this.fcmListenerProcess = listener;
-    listener.on('error', (error) => {
-      logRust(`FCM listener failed to start: ${errorSummary(error)}`);
-      if (this.fcmListenerProcess === listener) this.fcmListenerProcess = null;
-      this.fcmStatus = { registered: true, listening: false, message: 'Listener failed to start' };
-    });
-    this.fcmStatus = {
-      registered: true,
-      listening: true,
-      message: 'Listening for Rust+ pairing notifications',
-    };
-    let buffer = '';
-    listener.stdout?.on('data', (chunk: Buffer) => {
-      buffer += chunk.toString();
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        try {
-          this.handlePairing(JSON.parse(line));
-        } catch {
-          /* Ignore non-JSON listener output. */
-        }
-      }
-    });
-    listener.stderr?.on('data', (chunk: Buffer) => {
-      if (this.fcmListenerProcess === listener)
-        this.fcmStatus.message = `Listener error: ${chunk.toString().trim()}`;
-    });
-    listener.on('close', (code) => {
-      if (this.fcmListenerProcess !== listener) return;
-      this.fcmListenerProcess = null;
-      this.fcmStatus = {
-        registered: this.repository.hasFcmConfig(),
-        listening: false,
-        message: `Listener stopped (${code ?? 'unknown'})`,
-      };
-    });
-  }
-
-  private restartFcmListener(): void {
-    const previous = this.fcmListenerProcess;
-    if (!previous) {
-      this.startFcmListener();
-      return;
-    }
-    this.fcmListenerProcess = null;
-    this.fcmStatus = { registered: true, listening: false, message: 'Restarting FCM listener' };
-    previous.once('close', () => this.startFcmListener());
-    if (!previous.kill()) this.startFcmListener();
-  }
-
-  private startFcmRegister(): void {
-    if (this.repository.hasFcmConfig()) {
-      this.fcmStatus = {
-        registered: true,
-        listening: Boolean(this.fcmListenerProcess),
-        message: 'Rust+ is already registered',
-      };
-      this.startFcmListener();
-      return;
-    }
-    if (this.fcmRegisterProcess) return;
-    this.fcmRegisterProcess = spawn(
-      process.execPath,
-      [this.fcmCliPath, `--config-file=${this.repository.fcmConfigPath}`, 'fcm-register'],
-      { cwd: this.rootDirectory },
-    );
-    this.fcmRegisterProcess.on('error', (error) => {
-      logRust(`FCM registration failed to start: ${errorSummary(error)}`);
-      this.fcmRegisterProcess = null;
-      this.fcmStatus = {
-        registered: false,
-        listening: false,
-        message: 'Registration failed to start',
-      };
-    });
-    this.fcmStatus = {
-      registered: false,
-      listening: false,
-      message: 'Chrome is opening for Steam sign-in',
-    };
-    this.fcmRegisterProcess.stderr?.on('data', (chunk: Buffer) => {
-      this.fcmStatus.message = `Registration error: ${chunk.toString().trim()}`;
-    });
-    this.fcmRegisterProcess.on('close', (code) => {
-      this.fcmRegisterProcess = null;
-      if (code === 0 && this.repository.hasFcmConfig()) {
-        this.fcmStatus = { registered: true, listening: false, message: 'Registration complete' };
-        this.startFcmListener();
-        this.connect();
-      } else
-        this.fcmStatus = {
-          registered: false,
-          listening: false,
-          message: `Registration stopped (${code ?? 'unknown'})`,
-        };
-    });
-  }
-
-  private startMarkerPolling(): void {
-    this.stopMarkerPolling();
-    this.markerSnapshots = new Map();
-    const poll = () => {
-      if (!this.client || !this.status.connected) return;
-      this.client.getMapMarkers((message: any) => {
-        const markers = message.response?.mapMarkers?.markers;
-        if (!Array.isArray(markers)) return true;
-        this.mapMarkers = markers
-          .filter((marker: any) => Number(marker.type) !== MARKER_TYPE_PLAYER)
-          .map((marker: any) => ({
-            id: String(marker.id),
-            type: Number(marker.type),
-            x: Number(marker.x),
-            y: Number(marker.y),
-            name: String(marker.name || ''),
-          }))
-          .filter((marker: MapMarker) => Number.isFinite(marker.x) && Number.isFinite(marker.y));
-        const next = new Map(
-          markers.map((marker: any) => [
-            String(marker.id),
-            JSON.stringify({
-              type: marker.type,
-              name: marker.name,
-              outOfStock: marker.outOfStock,
-              sellOrders: marker.sellOrders,
-            }),
-          ]),
-        );
-        if (this.markerSnapshots.size)
-          for (const marker of markers) {
-            const id = String(marker.id);
-            const previous = this.markerSnapshots.get(id);
-            const changedVending = marker.type === 3 && previous && previous !== next.get(id);
-            const newEvent = !previous && [3, 4, 5, 8].includes(marker.type);
-            if (changedVending || newEvent)
-              this.publishEvent({
-                id: `${id}:${Date.now()}`,
-                title:
-                  (
-                    {
-                      3: 'Vending machine',
-                      4: 'CH47',
-                      5: 'Cargo Ship',
-                      8: 'Patrol Helicopter',
-                    } as Record<number, string>
-                  )[marker.type] || 'Map event',
-                body: changedVending
-                  ? `${marker.name || 'Offers'} changed`
-                  : 'New event detected on the map',
-                type: marker.type,
-                createdAt: new Date().toISOString(),
-              });
-          }
-        this.markerSnapshots = next;
-        return true;
-      });
-    };
-    poll();
-    this.markerPolling = setInterval(poll, 10000);
-  }
-
-  private stopMarkerPolling(): void {
-    if (this.markerPolling) clearInterval(this.markerPolling);
-    this.markerPolling = null;
-  }
-
-  private startTeamPolling(): void {
-    this.stopTeamPolling();
-    this.teamDeaths = new Map();
-    const poll = () => {
-      if (!this.client || !this.status.connected) return;
-      this.client.getTeamInfo((message: any) => {
-        const members = message.response?.teamInfo?.members;
-        if (!Array.isArray(members)) return true;
-        this.teamMapMembers = this.attachSteamAvatars(
-          members
-            .map((member: any) => ({
-              id: String(member.steamId),
-              name: String(member.name || 'Teammate'),
-              x: Number(member.x),
-              y: Number(member.y),
-              isOnline: Boolean(member.isOnline),
-            }))
-            .filter(
-              (member: TeamMapMember) => Number.isFinite(member.x) && Number.isFinite(member.y),
-            ),
-        );
-        const next = new Map(
-          members.map((member: any) => [String(member.steamId), Number(member.deathTime || 0)]),
-        );
-        if (this.teamDeaths.size)
-          for (const member of members) {
-            const previous = this.teamDeaths.get(String(member.steamId)) || 0;
-            const deathTime = Number(member.deathTime || 0);
-            if (!member.isAlive && deathTime > previous) {
-              const square = this.map
-                ? gridSquareLabel(this.map.mapSize, Number(member.x), Number(member.y))
-                : null;
-              this.publishEvent({
-                id: `${member.steamId}:${deathTime}`,
-                title: 'Player death',
-                body: square ? `${member.name} died in ${square}` : `${member.name} died`,
-                type: 'player-death',
-                createdAt: new Date().toISOString(),
-              });
-              this.recordDeathMarker({
-                id: `${member.steamId}:${deathTime}`,
-                playerId: String(member.steamId),
-                name: String(member.name || 'Teammate'),
-                x: Number(member.x),
-                y: Number(member.y),
-                deathTime,
-              });
-            }
-          }
-        this.teamDeaths = next;
-        return true;
-      });
-    };
-    poll();
-    this.teamPolling = setInterval(poll, 10000);
-  }
-
-  private stopTeamPolling(): void {
-    if (this.teamPolling) clearInterval(this.teamPolling);
-    this.teamPolling = null;
-  }
-
-  /** Rust+ only reports each player's current position, not death history, so this
-   *  is captured ourselves at the moment a death is detected and kept per player
-   *  (newest first, capped at `DEATH_MARKERS_PER_PLAYER`). */
-  private recordDeathMarker(marker: DeathMarker): void {
-    if (!Number.isFinite(marker.x) || !Number.isFinite(marker.y)) return;
-    const ownHistory = this.deathMarkers
-      .filter((entry) => entry.playerId === marker.playerId)
-      .concat(marker)
-      .sort((a, b) => b.deathTime - a.deathTime)
-      .slice(0, DEATH_MARKERS_PER_PLAYER);
-    this.deathMarkers = this.deathMarkers
-      .filter((entry) => entry.playerId !== marker.playerId)
-      .concat(ownHistory);
-  }
-
-  /**
-   * Reads whatever avatar URLs are already cached and kicks off a background refresh
-   * for any missing or stale ones; the refresh lands on the *next* poll cycle rather
-   * than blocking this one.
-   */
-  private attachSteamAvatars(members: TeamMapMember[]): TeamMapMember[] {
-    const apiKey = this.config.steamApiKey;
-    if (!apiKey) return members;
-    const now = Date.now();
-    const stale = members
-      .map((member) => member.id)
-      .filter((id) => {
-        const cached = this.steamAvatarCache.get(id);
-        return (!cached || cached.expiresAt < now) && !this.steamAvatarFetchInFlight.has(id);
-      });
-    if (stale.length) this.refreshSteamAvatars(apiKey, stale);
-    return members.map((member) => {
-      const cached = this.steamAvatarCache.get(member.id);
-      return cached ? { ...member, avatarUrl: cached.url } : member;
-    });
-  }
-
-  private refreshSteamAvatars(apiKey: string, steamIds: string[]): void {
-    steamIds.forEach((id) => this.steamAvatarFetchInFlight.add(id));
-    const url = `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${encodeURIComponent(apiKey)}&steamids=${steamIds.join(',')}`;
-    fetch(url)
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: any) => {
-        const players = data?.response?.players;
-        if (!Array.isArray(players)) return;
-        const expiresAt = Date.now() + STEAM_AVATAR_CACHE_MS;
-        for (const player of players) {
-          const avatarUrl = String(player.avatarfull || player.avatarmedium || player.avatar || '');
-          if (avatarUrl)
-            this.steamAvatarCache.set(String(player.steamid), { url: avatarUrl, expiresAt });
-        }
-      })
-      .catch((error) => logRust(`steam avatar fetch failed: ${errorSummary(error)}`))
-      .finally(() => steamIds.forEach((id) => this.steamAvatarFetchInFlight.delete(id)));
-  }
-
-  private loadMap(rustplus: any): void {
-    this.stopMapLoading();
-    try {
-      rustplus.getInfo((infoMessage: any) => {
-        if (this.client !== rustplus) return true;
-        if (isRateLimitError(infoMessage.response?.error)) {
-          this.scheduleMapRetry(rustplus);
-          return true;
-        }
-        const mapSize = Number(infoMessage.response?.info?.mapSize);
-        if (infoMessage.response?.error || !Number.isFinite(mapSize) || mapSize <= 0) return true;
-        rustplus.getMap((message: any) => {
-          if (this.client !== rustplus) return true;
-          if (isRateLimitError(message.response?.error)) {
-            this.scheduleMapRetry(rustplus);
-            return true;
-          }
-          if (message.response?.error) return true;
-          const map = message.response?.map;
-          const width = Number(map?.width);
-          const height = Number(map?.height);
-          if (!map?.jpgImage || !Number.isFinite(width) || !Number.isFinite(height)) return true;
-          const monuments: RustMonument[] = Array.isArray(map.monuments)
-            ? map.monuments
-                .map((monument: any) => ({
-                  token: String(monument.token || ''),
-                  x: Number(monument.x),
-                  y: Number(monument.y),
-                }))
-                .filter(
-                  (monument: RustMonument) =>
-                    monument.token &&
-                    Number.isFinite(monument.x) &&
-                    Number.isFinite(monument.y) &&
-                    // Underwater labs report one monument per room module (e.g.
-                    // ".../underwater-lab-base/module_900x900_2way_moonpool.prefab")
-                    // in addition to the lab's own entrance token
-                    // (".../monument/underwater_lab/underwater_lab_a.prefab"),
-                    // which duplicated the "Underwater Lab" label many times over.
-                    !/underwater-lab-base/i.test(monument.token),
-                )
-            : [];
-          this.map = {
-            width,
-            height,
-            oceanMargin: Number.isFinite(Number(map.oceanMargin)) ? Number(map.oceanMargin) : 0,
-            mapSize,
-            image: `data:image/jpeg;base64,${Buffer.from(map.jpgImage).toString('base64')}`,
-            monuments,
-          };
-          return true;
-        });
-        return true;
-      });
-    } catch (error) {
-      logRust(`map request failed: ${errorSummary(error)}`);
-    }
-  }
-
-  private scheduleMapRetry(rustplus: any): void {
-    this.stopMapLoading();
-    this.mapLoadTimer = setTimeout(() => {
-      this.mapLoadTimer = null;
-      if (this.client === rustplus) this.loadMap(rustplus);
-    }, MAP_LOAD_RETRY_MS);
-  }
-
-  private stopMapLoading(): void {
-    if (this.mapLoadTimer) clearTimeout(this.mapLoadTimer);
-    this.mapLoadTimer = null;
-  }
-
-  private startTeamChatPolling(rustplus: any): void {
-    this.stopTeamChatPolling();
-    const poll = () => {
-      if (this.client !== rustplus || !this.status.connected || this.teamChatRequest) return;
-      const request: TeamChatRequest = { rustplus, timeout: null };
-      this.teamChatRequest = request;
-      request.timeout = setTimeout(() => {
-        if (!this.finishTeamChatRequest(request)) return;
-        logRust('team chat poll timed out');
-      }, TEAM_CHAT_REQUEST_TIMEOUT_MS);
-      try {
-        rustplus.sendRequest({ getTeamChat: {} }, (message: any) => {
-          if (!this.finishTeamChatRequest(request)) return true;
-          if (this.client !== rustplus || message.response?.error) return true;
-          const messages = message.response?.teamChat?.messages;
-          if (!Array.isArray(messages)) return true;
-          for (const teamMessage of messages) this.handleTeamChatMessage(rustplus, teamMessage);
-          return true;
-        });
-      } catch (error) {
-        this.finishTeamChatRequest(request);
-        logRust(`team chat poll failed: ${errorSummary(error)}`);
-      }
-    };
-    poll();
-    this.teamChatPolling = setInterval(poll, TEAM_CHAT_POLLING_INTERVAL_MS);
-  }
-
-  private stopTeamChatPolling(): void {
-    if (this.teamChatPolling) clearInterval(this.teamChatPolling);
-    this.teamChatPolling = null;
-    if (this.teamChatRequest?.timeout) clearTimeout(this.teamChatRequest.timeout);
-    this.teamChatRequest = null;
-  }
-
-  private finishTeamChatRequest(request: TeamChatRequest): boolean {
-    if (this.teamChatRequest !== request) return false;
-    if (request.timeout) clearTimeout(request.timeout);
-    this.teamChatRequest = null;
-    return true;
-  }
-
-  private handleTeamChatMessage(rustplus: any, teamMessage: any): void {
-    const text = typeof teamMessage?.message === 'string' ? teamMessage.message : '';
-    const messageId = [teamMessage?.steamId, teamMessage?.time, text].join(':');
-    if (!text.startsWith('!') || this.processedTeamChatMessages.has(messageId)) return;
-    this.processedTeamChatMessages.add(messageId);
-    if (this.processedTeamChatMessages.size > TEAM_CHAT_SEEN_LIMIT)
-      this.processedTeamChatMessages.delete(this.processedTeamChatMessages.values().next().value!);
-
-    const command = text.slice(1).trim();
-    const action = command.endsWith('+') ? true : command.endsWith('-') ? false : null;
-    const targetName = (action === null ? command : command.slice(0, -1)).trim();
-    if (!targetName) return;
-    const targets = this.findChatTargets(targetName);
-    if (!targets.length) {
-      this.sendTeamChatMessage(rustplus, `Switch or group not found: ${targetName}.`);
-      return;
-    }
-    if (targets.length > 1) {
-      this.sendTeamChatMessage(
-        rustplus,
-        `Multiple switches or groups have the name: ${targetName}.`,
-      );
-      return;
-    }
-    if (action === null) void this.sendChatTargetState(rustplus, targets[0]);
-    else void this.setChatTargetValue(rustplus, targets[0], action);
-  }
-
-  private findChatTargets(name: string): ChatTarget[] {
-    const profile = this.activeProfile();
-    const normalizedName = name.toLocaleLowerCase();
-    if (!profile) return [];
-    const switches = profile.devices.filter(
-      (device) => device.type === 'switch' && device.name.toLocaleLowerCase() === normalizedName,
-    );
-    const groups = profile.groups
-      .filter((group) => group.name.toLocaleLowerCase() === normalizedName)
-      .map((group) => ({
-        name: group.name,
-        switchIds: group.deviceIds.filter((entityId) =>
-          profile.devices.some(
-            (device) => device.entityId === entityId && device.type === 'switch',
-          ),
-        ),
-        isGroup: true,
-      }))
-      .filter((group) => group.switchIds.length);
-    return [
-      ...switches.map((device) => ({
-        name: device.name,
-        switchIds: [device.entityId],
-        isGroup: false,
-      })),
-      ...groups,
-    ];
-  }
-
-  private async sendChatTargetState(rustplus: any, target: ChatTarget): Promise<void> {
-    const targetLabel = this.chatTargetLabel(target);
-    const results = await Promise.all(
-      target.switchIds.map(async (entityId) => ({
-        entityId,
-        value: await this.getRustEntityValue(rustplus, entityId),
-      })),
-    );
-    if (this.client !== rustplus) return;
-    const failedIds = results
-      .filter((result) => result.value === null)
-      .map((result) => result.entityId);
-    if (failedIds.length) {
-      this.sendTeamChatMessage(
-        rustplus,
-        `Unable to get state: ${targetLabel} (failed: ${failedIds.join(', ')}).`,
-      );
-      return;
-    }
-    for (const result of results) this.publishEntityState(result.entityId, result.value!);
-    this.sendTeamChatMessage(
-      rustplus,
-      `${targetLabel}: ${results.every((result) => result.value) ? 'on' : 'off'}.`,
-    );
-  }
-
-  private async setChatTargetValue(
-    rustplus: any,
-    target: ChatTarget,
-    enabled: boolean,
-  ): Promise<void> {
-    const targetLabel = this.chatTargetLabel(target);
-    const results = await Promise.all(
-      target.switchIds.map(async (entityId) => ({
-        entityId,
-        succeeded: await this.setRustEntityValue(rustplus, entityId, enabled),
-      })),
-    );
-    if (this.client !== rustplus) return;
-    for (const result of results)
-      if (result.succeeded) this.publishEntityState(result.entityId, enabled);
-    const failedIds = results
-      .filter((result) => !result.succeeded)
-      .map((result) => result.entityId);
-    if (failedIds.length) {
-      this.sendTeamChatMessage(
-        rustplus,
-        `${targetLabel}: ${results.length - failedIds.length}/${results.length} switches changed; failed: ${failedIds.join(', ')}.`,
-      );
-      return;
-    }
-    this.sendTeamChatMessage(rustplus, `${targetLabel}: ${enabled ? 'on' : 'off'}.`);
-  }
-
-  private chatTargetLabel(target: ChatTarget): string {
-    return target.isGroup ? `Group ${target.name}` : target.name;
-  }
-
-  private setRustEntityValue(rustplus: any, entityId: string, enabled: boolean): Promise<boolean> {
-    return new Promise((resolve) => {
-      try {
-        rustplus.setEntityValue(entityId, enabled, (message: any) => {
-          resolve(!message.response?.error);
-          return true;
-        });
-      } catch (error) {
-        logRust(`switch command failed: ${errorSummary(error)}`);
-        resolve(false);
-      }
-    });
-  }
-
-  private getRustEntityValue(rustplus: any, entityId: string): Promise<boolean | null> {
-    return new Promise((resolve) => {
-      try {
-        rustplus.getEntityInfo(entityId, (message: any) => {
-          const value = message.response?.entityInfo?.payload?.value;
-          resolve(message.response?.error || typeof value !== 'boolean' ? null : value);
-          return true;
-        });
-      } catch (error) {
-        logRust(`team chat state request failed: ${errorSummary(error)}`);
-        resolve(null);
-      }
-    });
-  }
-
-  private sendTeamChatMessage(rustplus: any, message: string): void {
-    if (this.client !== rustplus || !this.status.connected) return;
-    try {
-      rustplus.sendTeamMessage(`${TEAM_CHAT_MESSAGE_PREFIX} ${message}`);
-    } catch (error) {
-      logRust(`team chat reply failed: ${errorSummary(error)}`);
-    }
-  }
-
-  private startStoragePolling(rustplus: any, devices: Device[]): void {
-    this.stopStoragePolling();
-    const storageDevices = devices.filter((device) => device.type === 'storage');
-    if (!storageDevices.length) return;
-    const poll = () => {
-      if (this.client !== rustplus || !this.status.connected) return;
-      for (const device of storageDevices) this.refreshStorageState(rustplus, device.entityId);
-    };
-    poll();
-    this.storagePolling = setInterval(poll, STORAGE_POLLING_INTERVAL_MS);
-  }
-
-  private stopStoragePolling(): void {
-    if (this.storagePolling) clearInterval(this.storagePolling);
-    this.storagePolling = null;
-  }
-
   private cancelReconnect(): void {
     if (!this.reconnectTimer) return;
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
   }
 
-  private stopDeviceStateLoading(): void {
-    if (this.deviceStateLoadingTimer) clearTimeout(this.deviceStateLoadingTimer);
-    this.deviceStateLoadingTimer = null;
-  }
-
   private startPollingListeners(rustplus: any, devices: Device[]): void {
-    this.loadMap(rustplus);
-    this.startMarkerPolling();
-    this.startTeamPolling();
-    this.startTeamChatPolling(rustplus);
-    this.startStoragePolling(rustplus, devices);
-  }
-
-  private loadDeviceStates(rustplus: any, devices: Device[]): void {
-    this.stopDeviceStateLoading();
-    const pending = [...devices];
-    const total = pending.length;
-    logRust(`device state queue started: ${total} device(s)`);
-    const scheduleNext = (delay: number, requestNext: () => void) => {
-      this.deviceStateLoadingTimer = setTimeout(() => {
-        this.deviceStateLoadingTimer = null;
-        requestNext();
-      }, delay);
-    };
-    const requestNext = () => {
-      if (this.client !== rustplus || !this.status.connected) return;
-      const device = pending[0];
-      if (!device) {
-        logRust(`device state queue completed: ${total} device(s)`);
-        return;
-      }
-      const requestNumber = total - pending.length + 1;
-      logRust(`device state request ${requestNumber}/${total}`);
-      try {
-        rustplus.getEntityInfo(String(device.entityId), (message: any) => {
-          if (this.client !== rustplus) return true;
-          const responseError = message.response?.error;
-          if (responseError) {
-            logRust(
-              `device state response error ${requestNumber}/${total}: ${errorSummary({ name: 'Rust+ response', message: responseError.error })}`,
-            );
-            if (isRateLimitError(responseError)) {
-              scheduleNext(DEVICE_STATE_RATE_LIMIT_RETRY_MS, requestNext);
-              return true;
-            }
-          }
-          const payload = message.response?.entityInfo?.payload;
-          if (device.type === 'storage') this.publishStorageState(device.entityId, payload || {});
-          else if (typeof payload?.value === 'boolean')
-            this.publishEntityState(device.entityId, payload.value);
-          pending.shift();
-          if (pending.length) scheduleNext(DEVICE_STATE_REQUEST_DELAY_MS, requestNext);
-          else logRust(`device state queue completed: ${total} device(s)`);
-          return true;
-        });
-      } catch (error) {
-        logRust(`device state request failed ${requestNumber}/${total}: ${errorSummary(error)}`);
-        pending.shift();
-        if (pending.length) scheduleNext(DEVICE_STATE_REQUEST_DELAY_MS, requestNext);
-        else logRust(`device state queue completed: ${total} device(s)`);
-      }
-    };
-    requestNext();
+    this.worldState.loadMap(rustplus);
+    this.worldState.startMarkerPolling();
+    this.worldState.startTeamPolling();
+    this.teamChat.startTeamChatPolling(rustplus);
+    this.deviceState.startStoragePolling(rustplus, devices);
   }
 
   private scheduleReconnect(): void {
@@ -1375,12 +600,12 @@ export class RustplusControlService {
 
   private connect(): void {
     this.cancelReconnect();
-    this.stopDeviceStateLoading();
-    this.stopStoragePolling();
-    this.stopMarkerPolling();
-    this.stopTeamPolling();
-    this.stopTeamChatPolling();
-    this.clearMapState();
+    this.deviceState.stopDeviceStateLoading();
+    this.deviceState.stopStoragePolling();
+    this.worldState.stopMarkerPolling();
+    this.worldState.stopTeamPolling();
+    this.teamChat.stopTeamChatPolling();
+    this.worldState.clearMapState();
     if (this.client) {
       const previous = this.client;
       this.client = null;
@@ -1411,7 +636,7 @@ export class RustplusControlService {
       this.status = { connected: true, message: 'Connected' };
       logRust('connected');
       this.startPollingListeners(rustplus, profile.devices);
-      this.loadDeviceStates(rustplus, profile.devices);
+      this.deviceState.loadDeviceStates(rustplus, profile.devices);
     });
     rustplus.on('connecting', () => {
       if (this.client === rustplus) this.status = { connected: false, message: 'Connecting...' };
@@ -1419,21 +644,21 @@ export class RustplusControlService {
     rustplus.on('disconnected', () => {
       if (this.client !== rustplus) return;
       logRust(`disconnected; retrying in ${RECONNECT_DELAY_MS / 1000}s`);
-      this.stopDeviceStateLoading();
-      this.stopStoragePolling();
-      this.stopMarkerPolling();
-      this.stopTeamPolling();
-      this.stopTeamChatPolling();
+      this.deviceState.stopDeviceStateLoading();
+      this.deviceState.stopStoragePolling();
+      this.worldState.stopMarkerPolling();
+      this.worldState.stopTeamPolling();
+      this.teamChat.stopTeamChatPolling();
       this.scheduleReconnect();
     });
     rustplus.on('error', (error: Error) => {
       if (this.client !== rustplus) return;
       logRust(`socket error: ${errorSummary(error)}`);
       this.status = { connected: false, message: `Connection error: ${error.message}` };
-      this.stopStoragePolling();
-      this.stopMarkerPolling();
-      this.stopTeamPolling();
-      this.stopTeamChatPolling();
+      this.deviceState.stopStoragePolling();
+      this.worldState.stopMarkerPolling();
+      this.worldState.stopTeamPolling();
+      this.teamChat.stopTeamChatPolling();
       this.scheduleReconnect();
     });
     rustplus.on('message', (message: any) => {
@@ -1446,23 +671,9 @@ export class RustplusControlService {
   private async sendDiscordAlarm(profile: ServerProfile | null, device: Device): Promise<void> {
     const url = profile?.discordWebhookUrl;
     if (!url) return;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: `@everyone Alarm triggered: ${device.name}${profile?.name ? ` (${profile.name})` : ''}`,
-          allowed_mentions: { parse: ['everyone'] },
-        }),
-        signal: controller.signal,
-      });
-      if (!response.ok) logRust(`Discord alarm notification failed (${response.status})`);
-    } catch (error) {
-      logRust(`Discord alarm notification failed: ${(error as Error)?.name || 'Error'}`);
-    } finally {
-      clearTimeout(timeout);
-    }
+    await postDiscordAlarm(
+      url,
+      `@everyone Alarm triggered: ${device.name}${profile?.name ? ` (${profile.name})` : ''}`,
+    );
   }
 }

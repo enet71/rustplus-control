@@ -2,6 +2,26 @@
 
 Use this file for confirmed, project-specific lessons. Add entries in reverse chronological order.
 
+## 2026-08-29 - Player-placed in-game map markers come from `AppTeamInfo.mapNotes`/`leaderMapNotes`, not `AppMapMarkers`
+
+**Context:** Rendering the Rust+ map in `frontend/src/features/map/map-view.tsx`, backed by `backend/services/rustplus/world-state-service.ts`.
+
+**What went wrong:** User reported a marker they placed on the in-game F1 map wasn't visible in this app. First guess was that it was a `VendingMachine` (`AppMarkerType=3`) marker rendering issue — wrong, and reverted after the user corrected it ("это не вендинг маркер"). The actual cause: markers a player draws on the in-game map (the F1 map's "add marker" tool) are never delivered through `getMapMarkers`/`AppMapMarkers` at all — they arrive as `AppTeamInfo.mapNotes` (the marker owner's own notes) and `AppTeamInfo.leaderMapNotes` (the team leader's notes, visible to the whole team) inside the existing `getTeamInfo` poll response. `WorldStateService.startTeamPolling` only ever read `teamInfo.members`, so these notes were silently dropped server-side — there was nothing for the frontend to render regardless of its marker-type logic.
+
+**Required behavior:** Before assuming a rendering/styling bug for "a marker isn't showing," check whether the marker's data is one of `AppMapMarkers` (world markers: vending machines, cargo ship, CH47, patrol heli, crates, explosions — has `AppMarkerType`) or `AppTeamInfo.mapNotes`/`leaderMapNotes` (player-placed F1-map markers — has only `type`/`x`/`y`, no stable id, and is polled via `getTeamInfo` not `getMapMarkers`). Check `node_modules/@liamcottle/rustplus.js/rustplus.proto`'s message definitions rather than guessing from `AppMarkerType` alone.
+
+**Evidence:** User screenshot of the Outpost area with no marker shown despite one being placed in-game; `AppTeamInfo` in the proto has `repeated AppTeamInfo.Note mapNotes = 3;` and `repeated AppTeamInfo.Note leaderMapNotes = 4;` with `message Note { optional int32 type = 2; required float x = 3; required float y = 4; }`, entirely separate from `message AppMarker` (used by `AppMapMarkers`). Fixed by reading both note arrays inside the existing `getTeamInfo` poll and exposing them as a new `mapNotes` field through `getState()`.
+
+## 2026-08-29 - Negative margin does not cancel an `overflow-y-auto` ancestor's padding for a sticky child
+
+**Context:** `frontend/src/features/devices/controls-panel.tsx`'s toolbar row, made `sticky top-0` inside `frontend/src/features/dashboard/dashboard-page.tsx`'s `<div className="... p-8 overflow-y-auto">` scroll container.
+
+**What went wrong:** The scroll container's `p-8` leaves a permanent gap above a `sticky top-0` child (the container's top padding isn't "eaten" by sticky positioning), so scrolled content shows through above the stuck toolbar. First fix attempt added `-mt-8 pt-8` on the toolbar itself, expecting the negative margin to pull the toolbar's box up through the padding (a pattern that works for ordinary block layout). It did not: inside an `overflow-y-auto` ancestor the negative margin got absorbed/clipped rather than pulling the box up, so the padding gap remained *and* the new `pt-8` added on top of it, doubling the visible gap. User confirmed: "дырка все еще осталась... сабхедер теперь ниже в два раза" (the hole is still there, the subheader is now twice as low).
+
+**Required behavior:** To flush a `position: sticky` child against the top of an `overflow-y-auto` container that has top padding, do not fight it with negative margin on the sticky element. Instead remove the top padding from the scroll container itself (keep horizontal/bottom padding there) and re-add the equivalent spacing as real `padding-top` on the sticky element (covered by its own `bg-*`, since it's now the first unpadded child of the scrollport).
+
+**Evidence:** User screenshot after the `-mt-8 pt-8` attempt showed a larger gap than before with a device row still bleeding through above the sticky toolbar; fixed by moving the top padding off the shared scroll container (`dashboard-page.tsx`) and onto the sticky toolbar's own `pt-8` (`controls-panel.tsx`).
+
 ## 2026-08-28 - A negative `z-index` with no local stacking context escapes to the whole page
 
 **Context:** `frontend/src/styles/map.css`, `.map-marker-anchor.monument { z-index: -1; }` — intended to paint monument markers/labels behind team/event/death markers on the map, inside `.map-marker-layer`.

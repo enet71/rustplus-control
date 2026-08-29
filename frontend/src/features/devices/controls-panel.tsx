@@ -14,8 +14,9 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { Download, Plus, Upload } from 'lucide-react';
+import { ChevronsDownUp, ChevronsUpDown, Download, Plus, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '../../shared/ui/confirm-dialog';
 import type { DashboardState, Device, DeviceGroup } from '../../shared/api-types';
 import { readCollapsedGroups, writeCollapsedGroups } from './collapsed-groups';
 import { groupSwitches, isGroupEnabled, orderControlItems } from './control-items';
@@ -50,6 +51,9 @@ export function ControlsPanel({
   // once on mount instead of being resynchronised from an effect.
   const serverId = state.config.activeServerId || '';
   const [collapsed, setCollapsed] = useState(() => readCollapsedGroups(serverId));
+  const [pendingDelete, setPendingDelete] = useState<
+    { kind: 'device'; device: Device } | { kind: 'group'; group: DeviceGroup } | null
+  >(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -65,8 +69,24 @@ export function ControlsPanel({
     });
 
   const devices = state.config.devices || [];
-  const items = orderControlItems(devices, state.config.groups || []);
+  const groups = state.config.groups || [];
+  const groupIds = groups.map((group) => group.id);
+  const items = orderControlItems(devices, groups);
   const topLevelIds = items.map((item) => item.id);
+
+  const expandAll = (): void =>
+    setCollapsed(() => {
+      const next = new Set<string>();
+      writeCollapsedGroups(serverId, next);
+      return next;
+    });
+
+  const collapseAll = (): void =>
+    setCollapsed(() => {
+      const next = new Set(groupIds);
+      writeCollapsedGroups(serverId, next);
+      return next;
+    });
 
   const renderDevice = (device: Device, child: boolean) => (
     <DeviceRow
@@ -80,8 +100,21 @@ export function ControlsPanel({
         mutations.setDeviceEnabled.mutate({ entityId: target.entityId, enabled })
       }
       onRename={onRenameDevice}
+      onDelete={(target) => setPendingDelete({ kind: 'device', device: target })}
     />
   );
+
+  const confirmDelete = async (): Promise<void> => {
+    if (!pendingDelete) return;
+    try {
+      if (pendingDelete.kind === 'device')
+        await mutations.deleteDevice.mutateAsync(pendingDelete.device.entityId);
+      else await mutations.deleteGroup.mutateAsync(pendingDelete.group.id);
+      setPendingDelete(null);
+    } catch {
+      // The mutation reports the failure; the dialog stays open for another attempt.
+    }
+  };
 
   const handleTopLevelDragEnd = (event: DragEndEvent): void => {
     const { active, over } = event;
@@ -115,7 +148,7 @@ export function ControlsPanel({
 
   return (
     <section>
-      <div className="flex items-center justify-end gap-2">
+      <div className="sticky top-0 z-10 flex items-center justify-end gap-2 bg-background pt-8 pb-3">
         <Button variant="secondary" onClick={onImport} disabled={importing}>
           <Upload /> Import
         </Button>
@@ -125,6 +158,24 @@ export function ControlsPanel({
         <Button variant="secondary" onClick={onNewGroup} disabled={!devices.length}>
           <Plus /> New group
         </Button>
+        <Button
+          variant="secondary"
+          size="icon"
+          onClick={expandAll}
+          disabled={!groupIds.length || collapsed.size === 0}
+          aria-label="Expand all groups"
+        >
+          <ChevronsUpDown />
+        </Button>
+        <Button
+          variant="secondary"
+          size="icon"
+          onClick={collapseAll}
+          disabled={!groupIds.length || collapsed.size === groupIds.length}
+          aria-label="Collapse all groups"
+        >
+          <ChevronsDownUp />
+        </Button>
       </div>
       <DndContext
         sensors={sensors}
@@ -132,7 +183,7 @@ export function ControlsPanel({
         onDragEnd={handleTopLevelDragEnd}
       >
         <SortableContext items={topLevelIds} strategy={verticalListSortingStrategy}>
-          <div className="mt-6 grid gap-2.5">
+          <div className="mt-3 grid gap-2.5">
             {items.map((item) => {
               if (item.kind === 'device') return renderDevice(item.device, false);
               const switches = groupSwitches(item.members);
@@ -152,6 +203,7 @@ export function ControlsPanel({
                     }
                     onToggleCollapsed={toggleCollapsed}
                     onEdit={onEditGroup}
+                    onDelete={(target) => setPendingDelete({ kind: 'group', group: target })}
                   />
                   {!isCollapsed && (
                     <DndContext
@@ -174,6 +226,23 @@ export function ControlsPanel({
         <p className="mt-6 text-sm text-muted-foreground">
           Pair a Smart Switch or Smart Alarm in Rust to add it here.
         </p>
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          title={pendingDelete.kind === 'device' ? 'Delete device?' : 'Delete group?'}
+          description={
+            pendingDelete.kind === 'device'
+              ? `Remove "${pendingDelete.device.name}"? You can pair it again later if needed.`
+              : `Delete the group "${pendingDelete.group.name}"? Its devices won't be removed.`
+          }
+          pending={
+            pendingDelete.kind === 'device'
+              ? mutations.deleteDevice.isPending
+              : mutations.deleteGroup.isPending
+          }
+          onConfirm={() => void confirmDelete()}
+          close={() => setPendingDelete(null)}
+        />
       )}
     </section>
   );

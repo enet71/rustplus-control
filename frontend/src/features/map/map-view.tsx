@@ -6,9 +6,17 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { Moon, Skull, Train, TrainFrontTunnel, User } from 'lucide-react';
+import { MapPin, Moon, Skull, Train, TrainFrontTunnel, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardState } from '../../shared/api-types';
+import {
+  readHiddenNoteSources,
+  writeHiddenNoteSources,
+  type NoteSource,
+} from './hidden-note-sources';
+import { readHiddenPlayers, writeHiddenPlayers } from './hidden-players';
+import { readTeamPanelOpen, writeTeamPanelOpen } from './team-panel-open';
+import { TeamVisibilityPanel } from './team-visibility-panel';
 import {
   centeredMapTransform,
   clampMapTransform,
@@ -32,6 +40,7 @@ type MapViewProps = {
   serverId: string;
   teamMapMembers: DashboardState['teamMapMembers'];
   mapMarkers: DashboardState['mapMarkers'];
+  mapNotes: DashboardState['mapNotes'];
   deathMarkers: DashboardState['deathMarkers'];
 };
 
@@ -43,7 +52,13 @@ function MapPlaceholder({ message }: { message: string }) {
   );
 }
 
-export function MapView({ serverId, teamMapMembers, mapMarkers, deathMarkers }: MapViewProps) {
+export function MapView({
+  serverId,
+  teamMapMembers,
+  mapMarkers,
+  mapNotes,
+  deathMarkers,
+}: MapViewProps) {
   const { data: map, error } = useMap(serverId);
   // A plain ref set in a mount-only effect would miss the container: `map` is still
   // undefined on the very first render (react-query never has data synchronously),
@@ -56,6 +71,51 @@ export function MapView({ serverId, teamMapMembers, mapMarkers, deathMarkers }: 
   const [transform, setTransform] = useState<MapTransform>({ x: 0, y: 0, scale: 1 });
   const [isPanning, setIsPanning] = useState(false);
   const [resetKey, setResetKey] = useState('');
+  const [hiddenPlayers, setHiddenPlayers] = useState<Set<string>>(() =>
+    readHiddenPlayers(serverId),
+  );
+  const [hiddenNoteSources, setHiddenNoteSources] = useState<Set<NoteSource>>(() =>
+    readHiddenNoteSources(serverId),
+  );
+  const [teamPanelOpen, setTeamPanelOpen] = useState(() => readTeamPanelOpen(serverId));
+  const [hiddenStateServerId, setHiddenStateServerId] = useState(serverId);
+
+  // `MapView` isn't remounted per server (unlike `ControlsPanel`), so the stored sets
+  // have to be re-read explicitly whenever the active server changes instead of only
+  // once at mount — done during render, mirroring the `resetKey` pattern below.
+  if (hiddenStateServerId !== serverId) {
+    setHiddenStateServerId(serverId);
+    setHiddenPlayers(readHiddenPlayers(serverId));
+    setHiddenNoteSources(readHiddenNoteSources(serverId));
+    setTeamPanelOpen(readTeamPanelOpen(serverId));
+  }
+
+  const setTeamPanelOpenPersisted = (open: boolean): void => {
+    writeTeamPanelOpen(serverId, open);
+    setTeamPanelOpen(open);
+  };
+
+  const togglePlayerHidden = (id: string): void =>
+    setHiddenPlayers((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      writeHiddenPlayers(serverId, next);
+      return next;
+    });
+
+  const toggleNoteSource = (source: NoteSource): void =>
+    setHiddenNoteSources((current) => {
+      const next = new Set(current);
+      if (next.has(source)) next.delete(source);
+      else next.add(source);
+      writeHiddenNoteSources(serverId, next);
+      return next;
+    });
+
+  const visibleTeamMembers = teamMapMembers.filter((member) => !hiddenPlayers.has(member.id));
+  const visibleDeathMarkers = deathMarkers.filter((death) => !hiddenPlayers.has(death.playerId));
+  const visibleMapNotes = mapNotes.filter((note) => !hiddenNoteSources.has(note.source));
 
   const aspect = map ? map.width / map.height : 1;
   // Memoized so its identity only changes when the inputs genuinely do — the wheel
@@ -189,7 +249,7 @@ export function MapView({ serverId, teamMapMembers, mapMarkers, deathMarkers }: 
             } as CSSProperties
           }
         >
-          {teamMapMembers.map((member) => (
+          {visibleTeamMembers.map((member) => (
             <span
               className="map-marker-anchor"
               key={member.id}
@@ -218,7 +278,19 @@ export function MapView({ serverId, teamMapMembers, mapMarkers, deathMarkers }: 
               <span className={`map-marker ${markerKind(marker.type)}`} />
             </span>
           ))}
-          {deathMarkers.map((death) => (
+          {visibleMapNotes.map((note) => (
+            <span
+              className="map-marker-anchor"
+              key={note.id}
+              style={markerPosition(map, note)}
+              title="Marker placed in-game"
+            >
+              <span className="map-marker note">
+                <MapPin className="size-3" />
+              </span>
+            </span>
+          ))}
+          {visibleDeathMarkers.map((death) => (
             <span
               className="map-marker-anchor"
               key={death.id}
@@ -250,6 +322,15 @@ export function MapView({ serverId, teamMapMembers, mapMarkers, deathMarkers }: 
             </span>
           ))}
         </div>
+        <TeamVisibilityPanel
+          members={teamMapMembers}
+          hiddenIds={hiddenPlayers}
+          onToggle={togglePlayerHidden}
+          hiddenNoteSources={hiddenNoteSources}
+          onToggleNoteSource={toggleNoteSource}
+          open={teamPanelOpen}
+          onOpenChange={setTeamPanelOpenPersisted}
+        />
       </div>
       <div className="map-legend">
         <span>
@@ -263,6 +344,10 @@ export function MapView({ serverId, teamMapMembers, mapMarkers, deathMarkers }: 
         <span>
           <i className="map-dot map-dot-marker" />
           Server markers
+        </span>
+        <span>
+          <i className="map-dot map-dot-note" />
+          Your markers
         </span>
         <span>
           <i className="map-dot map-dot-death" />
